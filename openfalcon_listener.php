@@ -370,8 +370,11 @@ while (true) {
     }
 
     if (!$enabled) {
-        usleep(500000);
-        continue;
+        // Stop command was fired — actually exit the process so postStart.sh
+        // (or a manual restart) can launch a fresh one. This way pgrep shows
+        // accurate status.
+        logEntry("Listener disabled via stop command — exiting.");
+        exit(0);
     }
 
     // Heartbeat

@@ -7,7 +7,7 @@ $pluginName = "openfalcon";
 $pluginConfigFile = $settings['configDirectory'] . "/plugin." . $pluginName;
 $pluginSettings = @parse_ini_file($pluginConfigFile) ?: array();
 
-$pluginVersion = "0.7.5";
+$pluginVersion = "0.7.8";
 
 // Helper for safe display of saved values
 function val($settings, $key, $default = '') {
@@ -690,12 +690,40 @@ if (!empty(trim((string)$ps))) {
     });
   }
 
+  // ============================================================
+  // Live banner — polls plugin's listener_status.php to keep the
+  // running/stopped banner in sync without page refresh.
+  // ============================================================
+  async function refreshListenerBanner() {
+    try {
+      const res = await fetch('/plugin.php?_menu=content&plugin=openfalcon&page=listener_status.php&nopage=1', { cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      const banner = document.getElementById('listenerBanner');
+      if (!banner) return;
+      if (data.running) {
+        banner.classList.remove('stopped');
+        banner.classList.add('running');
+        banner.textContent = 'OpenFalcon Listener is Running';
+      } else {
+        banner.classList.remove('running');
+        banner.classList.add('stopped');
+        banner.textContent = 'OpenFalcon Listener is Stopped';
+      }
+    } catch (e) { /* non-fatal */ }
+  }
+
+  // Poll every 4 seconds while page is open
+  setInterval(refreshListenerBanner, 4000);
+
   async function restartListener() {
     setStatus('restartStatus', 'Restarting…', 'muted');
     try {
       await runFppCommand('OpenFalcon - Restart Listener');
-      setTimeout(() => {
-        setStatus('restartStatus', '✓ Listener restarted (refresh page to confirm)', 'success');
+      // Give fppd a moment to actually start the new process
+      setTimeout(async () => {
+        await refreshListenerBanner();
+        setStatus('restartStatus', '✓ Listener restarted', 'success');
       }, 1500);
     } catch (err) {
       setStatus('restartStatus', '✗ ' + err.message, 'error');
@@ -707,8 +735,9 @@ if (!empty(trim((string)$ps))) {
     setStatus('stopStatus', 'Stopping…', 'muted');
     try {
       await runFppCommand('OpenFalcon - Stop Listener');
-      setTimeout(() => {
-        setStatus('stopStatus', '✓ Listener stopped (refresh page to confirm)', 'success');
+      setTimeout(async () => {
+        await refreshListenerBanner();
+        setStatus('stopStatus', '✓ Listener stopped', 'success');
       }, 1500);
     } catch (err) {
       setStatus('stopStatus', '✗ ' + err.message, 'error');
