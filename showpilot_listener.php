@@ -5,7 +5,7 @@
 // ShowPilot server; queues sequences when viewers vote/request.
 // ============================================================
 
-$PLUGIN_VERSION = "0.2.0";
+$PLUGIN_VERSION = "0.8.1";
 
 // Suppress FPP web UI JS output when running from CLI
 $skipJSsettings = true;
