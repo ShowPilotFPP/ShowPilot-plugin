@@ -7,7 +7,7 @@ $pluginName = "openfalcon";
 $pluginConfigFile = $settings['configDirectory'] . "/plugin." . $pluginName;
 $pluginSettings = @parse_ini_file($pluginConfigFile) ?: array();
 
-$pluginVersion = "0.7.15";
+$pluginVersion = "0.7.16";
 
 // Helper for safe display of saved values
 function val($settings, $key, $default = '') {
@@ -298,7 +298,6 @@ if (!empty(trim((string)$ps))) {
     <button type="button" class="of-tab-btn"        data-tab="playlist"    onclick="ofSwitchTab('playlist')">Playlist</button>
     <button type="button" class="of-tab-btn"        data-tab="behavior"    onclick="ofSwitchTab('behavior')">Behavior</button>
     <button type="button" class="of-tab-btn"        data-tab="listener"    onclick="ofSwitchTab('listener')">Listener</button>
-    <button type="button" class="of-tab-btn"        data-tab="audio"       onclick="ofSwitchTab('audio')">Audio</button>
     <button type="button" class="of-tab-btn"        data-tab="diagnostics" onclick="ofSwitchTab('diagnostics')">Diagnostics</button>
     <button type="button" class="of-tab-btn"        data-tab="developer"   onclick="ofSwitchTab('developer')">Developer</button>
   </div>
@@ -517,69 +516,6 @@ if (!empty(trim((string)$ps))) {
   </div>
 
   </div><!-- /tab: listener -->
-
-  <!-- ============================================ -->
-  <!-- TAB: AUDIO STREAMING                         -->
-  <!-- ============================================ -->
-  <div class="of-tab-pane" data-tab-pane="audio">
-  <div class="of-section-header">
-    <h2>Audio Streaming <span style="font-size: 0.7em; color: var(--of-text-dim); font-weight: 400;">(experimental)</span></h2>
-    <div class="of-section-sub">
-      Stream the show audio to viewer phones via WebSocket-synced HTML5 audio.
-      Requires Node.js on FPP (auto-installed). May have legal implications &mdash; see warning below.
-    </div>
-  </div>
-
-  <div class="of-row">
-    <div>
-      <div class="of-label">Enable Audio Streaming</div>
-      <div class="of-help warn">
-        WARNING: Streaming licensed music to anonymous viewers may require ASCAP/BMI/SoundExchange licensing.
-        Low-power FM broadcast to your driveway likely qualifies for performance carveouts;
-        internet streaming generally does not. You are responsible for compliance.
-      </div>
-    </div>
-    <div class="of-control">
-      <label class="of-toggle">
-        <input type="checkbox" id="audioStreamingEnabled"
-               <?php echo (val($pluginSettings, 'audioStreamingEnabled') === 'true') ? 'checked' : ''; ?>
-               onchange="SetPluginSetting('<?php echo $pluginName; ?>', 'audioStreamingEnabled', this.checked ? 'true' : 'false');">
-        <span class="of-toggle-slider"></span>
-      </label>
-    </div>
-  </div>
-
-  <div class="of-row">
-    <div>
-      <div class="of-label">Audio Daemon Port</div>
-      <div class="of-help">
-        TCP port the audio daemon listens on. Default <code>8090</code>.
-        Must be reachable from viewer browsers if they're not on the same network.
-      </div>
-    </div>
-    <div class="of-control">
-      <input type="number" class="of-input" id="audioStreamingPort" min="1024" max="65535"
-             value="<?php echo htmlspecialchars(val($pluginSettings, 'audioStreamingPort') ?: '8090'); ?>"
-             onchange="SetPluginSetting('<?php echo $pluginName; ?>', 'audioStreamingPort', this.value);">
-    </div>
-  </div>
-
-  <div class="of-row">
-    <div>
-      <div class="of-label">Daemon Status</div>
-      <div class="of-help">
-        Live status of the audio streaming daemon. Restart Listener to apply changes after toggling.
-      </div>
-    </div>
-    <div class="of-control">
-      <div class="of-btn-group">
-        <span id="audioDaemonStatus" class="of-status muted">Checking…</span>
-        <button type="button" class="of-btn of-btn-neutral" onclick="checkAudioDaemon();" style="font-size: 0.8rem; padding: 4px 10px;">Refresh</button>
-      </div>
-    </div>
-  </div>
-
-  </div><!-- /tab: audio -->
 
   <!-- ============================================ -->
   <!-- TAB: DIAGNOSTICS                             -->
@@ -934,10 +870,6 @@ if (!empty(trim((string)$ps))) {
     document.querySelectorAll('.of-tab-pane').forEach(pane => {
       pane.classList.toggle('active', pane.dataset.tabPane === name);
     });
-    // Auto-check audio daemon status when audio tab opens
-    if (name === 'audio' && typeof checkAudioDaemon === 'function') {
-      checkAudioDaemon();
-    }
     // Persist selection so refreshes return to same tab
     try { localStorage.setItem('openfalcon_plugin_tab', name); } catch {}
   }
@@ -976,45 +908,6 @@ if (!empty(trim((string)$ps))) {
 
   // Poll every 4 seconds while page is open
   setInterval(refreshListenerBanner, 4000);
-
-  // ============================================================
-  // AUDIO DAEMON STATUS
-  // ============================================================
-  async function checkAudioDaemon() {
-    const portInput = document.getElementById('audioStreamingPort');
-    const port = (portInput && portInput.value) || '8090';
-    const enabled = document.getElementById('audioStreamingEnabled')?.checked;
-    const statusEl = document.getElementById('audioDaemonStatus');
-    if (!statusEl) return;
-
-    if (!enabled) {
-      statusEl.textContent = 'Disabled';
-      statusEl.className = 'of-status muted';
-      return;
-    }
-
-    statusEl.textContent = 'Checking…';
-    statusEl.className = 'of-status muted';
-    try {
-      // Hit the daemon's /health on FPP itself (we're served by FPP)
-      const res = await fetch(`http://${window.location.hostname}:${port}/health`, {
-        signal: AbortSignal.timeout(2000),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        statusEl.textContent = `✓ Running (v${data.version || '?'}) on port ${port}`;
-        statusEl.className = 'of-status success';
-      } else {
-        statusEl.textContent = `Daemon returned ${res.status}`;
-        statusEl.className = 'of-status error';
-      }
-    } catch (e) {
-      statusEl.textContent = 'Not running — Restart Listener to start it';
-      statusEl.className = 'of-status error';
-    }
-  }
-  // Auto-check on load
-  setTimeout(checkAudioDaemon, 500);
 
   async function restartListener() {
     setStatus('restartStatus', 'Restarting…', 'muted');

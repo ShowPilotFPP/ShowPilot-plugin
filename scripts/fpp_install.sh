@@ -30,19 +30,6 @@ chown -R fpp:fpp "$PLUGIN_DIR" 2>/dev/null
 #  explicitly here to be safe.)
 chmod +x "$PLUGIN_DIR/commands/"*.php 2>/dev/null
 chmod +x "$PLUGIN_DIR/scripts/"*.sh 2>/dev/null
-chmod +x "$PLUGIN_DIR/openfalcon_audio.js" 2>/dev/null
-
-# Install Node.js dependencies for the audio daemon (ws for WebSocket support).
-# FPP ships with Node and npm; if not present, the daemon won't start but the
-# rest of the plugin still works.
-if command -v npm >/dev/null 2>&1; then
-    cd "$PLUGIN_DIR"
-    if [ ! -d "node_modules/ws" ]; then
-        echo "Installing audio daemon dependencies..."
-        npm install --no-audit --no-fund --silent ws 2>&1 || echo "WARN: npm install failed; audio daemon will run without WebSocket support"
-    fi
-    chown -R fpp:fpp "$PLUGIN_DIR/node_modules" 2>/dev/null
-fi
 
 # Restart fppd after install so it picks up our commands and starts the listener
 setSetting restartFlag 1
