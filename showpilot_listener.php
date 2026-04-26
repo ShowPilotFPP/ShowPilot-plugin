@@ -5,7 +5,7 @@
 // ShowPilot server; queues sequences when viewers vote/request.
 // ============================================================
 
-$PLUGIN_VERSION = "0.8.8";
+$PLUGIN_VERSION = "0.9.4";
 
 // Suppress FPP web UI JS output when running from CLI
 $skipJSsettings = true;
@@ -102,6 +102,59 @@ logEntry("Remote Playlist: " . $cfg['remotePlaylist']);
 logEntry("Interrupt Schedule: " . ($cfg['interruptSchedule'] ? 'yes' : 'no'));
 logEntry("Request Fetch Time: " . $cfg['requestFetchTime'] . "s");
 logEntry("FPP Status Check Time: " . $cfg['fppStatusCheckTime'] . "s");
+
+// ============================================================
+// Register the configured ShowPilot URL with FPP's Content Security
+// Policy whitelist.
+// ============================================================
+// FPP's Apache config has a strict CSP that blocks the plugin UI from
+// making fetch() calls to non-whitelisted origins. Without this, the
+// browser console fills with "Refused to connect" errors on the very
+// first Sync attempt — a confusing first-run experience.
+//
+// /opt/fpp/scripts/ManageApacheContentPolicy.sh maintains a
+// per-directive whitelist file that Apache reads on each request.
+// Adding our origin once is idempotent (no harm in re-adding).
+//
+// We do this at listener startup rather than on settings save because
+// (a) there's no save hook in the plugin save flow, and (b) running
+// it at startup means a listener restart (which users already do via
+// the plugin UI) re-registers any newly-changed URL.
+function registerCspOrigin($url) {
+    if (empty($url)) return;
+    $script = '/opt/fpp/scripts/ManageApacheContentPolicy.sh';
+    if (!file_exists($script)) {
+        logEntry("CSP register skipped - $script not found (older FPP?)");
+        return;
+    }
+    $parsed = parse_url($url);
+    if (!$parsed || empty($parsed['scheme']) || empty($parsed['host'])) {
+        logEntry("CSP register skipped - cannot parse origin from URL: $url");
+        return;
+    }
+    // Build origin: scheme + host + optional port. CSP whitelist entries
+    // are origin-only (no path). Default ports (80 for http, 443 for https)
+    // can be implied by the scheme but we explicitly include any non-default
+    // port for clarity.
+    $origin = $parsed['scheme'] . '://' . $parsed['host'];
+    if (!empty($parsed['port'])) {
+        $origin .= ':' . $parsed['port'];
+    }
+    // escapeshellarg to defend against any weirdness in the URL even
+    // though we already validated parse_url. Belt-and-suspenders.
+    $cmd = $script . ' add connect-src ' . escapeshellarg($origin) . ' 2>&1';
+    $output = array();
+    $exitCode = 0;
+    exec($cmd, $output, $exitCode);
+    if ($exitCode === 0) {
+        logEntry("CSP register OK: connect-src $origin");
+    } else {
+        logEntry("CSP register FAILED ($exitCode): " . implode(' | ', $output));
+    }
+    // Apache picks up CSP changes from the regenerated config file
+    // automatically (no restart required for the connect-src list).
+}
+registerCspOrigin($cfg['serverUrl']);
 
 if (empty($cfg['serverUrl']) || empty($cfg['showToken'])) {
     logEntry("WARNING - Server URL or Show Token is empty. Plugin will idle until configured.");

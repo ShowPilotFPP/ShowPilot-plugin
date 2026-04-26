@@ -31,6 +31,7 @@ chmod +x "$PLUGIN_DIR/commands/"*.php 2>/dev/null
 chmod +x "$PLUGIN_DIR/scripts/"*.sh 2>/dev/null
 chmod +x "$PLUGIN_DIR/showpilot_listener.php" 2>/dev/null
 chmod +x "$PLUGIN_DIR/listener_status.php" 2>/dev/null
+chmod +x "$PLUGIN_DIR/extract_audio.php" 2>/dev/null
 
 # 2. Kill any existing listener. Idempotent — exit 0 if killed, 1 if none
 # found. Both fine here.

@@ -406,6 +406,10 @@ if (!empty(trim((string)$ps))) {
         <input type="checkbox" id="syncMetadataCheckbox" checked style="cursor: pointer;">
         Read MP3 tags during sync (slower, but uses real song titles &amp; artists)
       </label>
+      <label style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem; font-size: 0.88rem; color: var(--of-text-muted); cursor: pointer;">
+        <input type="checkbox" id="syncAudioCheckbox" checked style="cursor: pointer;">
+        Upload audio files to ShowPilot (recommended &mdash; serves audio from ShowPilot instead of FPP, much faster &amp; scales to many viewers)
+      </label>
     </div>
   </div>
 
@@ -824,11 +828,378 @@ if (!empty(trim((string)$ps))) {
       }
 
       const data = await syncRes.json();
-      setStatus('syncStatus', '✓ Synced ' + (data.synced || sequences.length) + ' sequences', 'success');
+
+      // ---- Audio cache sync (v0.9.0-beta+) ----
+      // Bundled with the existing metadata sync. If the user has unchecked
+      // the audio-sync checkbox, skip — they're opting out (probably because
+      // their LAN to ShowPilot is slow, or they're testing). Default is on.
+      const audioSync = document.getElementById('syncAudioCheckbox');
+      const shouldSyncAudio = !audioSync || audioSync.checked;
+      let audioSyncSummary = '';
+      if (shouldSyncAudio) {
+        try {
+          audioSyncSummary = await syncAudioCache(serverUrl, showToken, sequences);
+        } catch (e) {
+          // Audio sync failure shouldn't fail the whole sync — metadata is
+          // already pushed, viewers still work via the FPP-proxy fallback
+          // for any missing audio.
+          console.error('Audio sync failed:', e);
+          audioSyncSummary = ' · audio sync failed: ' + e.message;
+        }
+      }
+
+      setStatus('syncStatus',
+        '✓ Synced ' + (data.synced || sequences.length) + ' sequences' + audioSyncSummary,
+        'success');
     } catch (err) {
       setStatus('syncStatus', 'Sync failed: ' + err.message, 'error');
       console.error(err);
     }
+  }
+
+  // ============================================================
+  // sha256Hex — compute SHA-256 of an ArrayBuffer, return hex string
+  // ============================================================
+  // Wraps crypto.subtle.digest when available, falls back to a pure-JS
+  // implementation when not. The plugin UI runs from FPP's HTTP server
+  // on a LAN IP, which Chrome/Firefox treat as a non-secure context —
+  // crypto.subtle is undefined in that case, so the fallback exists for
+  // the common deployment.
+  //
+  // Native path: typed arrays, hardware-accelerated, processes a 5 MB
+  // file in ~5 ms. Fallback path: pure JS, processes the same file in
+  // ~250 ms. Both are fast enough for our use case (60 sequences × 5 MB
+  // = 15 seconds worst case on the slow path).
+  async function sha256Hex(buffer) {
+    if (typeof crypto !== 'undefined' && crypto.subtle && crypto.subtle.digest) {
+      try {
+        const hashBuf = await crypto.subtle.digest('SHA-256', buffer);
+        const arr = Array.from(new Uint8Array(hashBuf));
+        return arr.map(b => b.toString(16).padStart(2, '0')).join('');
+      } catch (e) {
+        // crypto.subtle exists but blew up (rare). Fall through to JS impl.
+        console.warn('crypto.subtle.digest failed, using JS fallback:', e);
+      }
+    }
+    return sha256HexJS(new Uint8Array(buffer));
+  }
+
+  // Pure-JS SHA-256 implementation. Standard FIPS 180-4 algorithm, not
+  // optimized — clarity over micro-performance since we're processing
+  // a few dozen multi-MB files, not millions of tiny ones. This code
+  // follows the reference implementation closely; if you need to
+  // verify it, compare against any standard SHA-256 test vector
+  // (e.g. "abc" → ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad).
+  function sha256HexJS(bytes) {
+    const K = [
+      0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+      0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+      0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+      0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+      0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+      0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+      0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+      0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+    ];
+    const H = [
+      0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+    ];
+    function rotr(n, x) { return ((x >>> n) | (x << (32 - n))) >>> 0; }
+
+    // Pad message to 512-bit (64-byte) blocks. Length in bits as 64-bit
+    // big-endian at the end; SHA-256 spec requires this exact format.
+    const bitLen = bytes.length * 8;
+    const padLen = ((bytes.length + 9 + 63) >> 6) << 6; // round up to multiple of 64
+    const padded = new Uint8Array(padLen);
+    padded.set(bytes);
+    padded[bytes.length] = 0x80;
+    // Length is 64-bit big-endian; we only fill the low 32 bits because
+    // browser ArrayBuffers can't exceed ~2GB anyway.
+    const view = new DataView(padded.buffer);
+    view.setUint32(padLen - 4, bitLen >>> 0, false);
+    view.setUint32(padLen - 8, Math.floor(bitLen / 0x100000000), false);
+
+    const W = new Uint32Array(64);
+    for (let i = 0; i < padLen; i += 64) {
+      for (let t = 0; t < 16; t++) {
+        W[t] = view.getUint32(i + t * 4, false);
+      }
+      for (let t = 16; t < 64; t++) {
+        const s0 = rotr(7, W[t - 15]) ^ rotr(18, W[t - 15]) ^ (W[t - 15] >>> 3);
+        const s1 = rotr(17, W[t - 2]) ^ rotr(19, W[t - 2]) ^ (W[t - 2] >>> 10);
+        W[t] = (W[t - 16] + s0 + W[t - 7] + s1) >>> 0;
+      }
+
+      let [a, b, c, d, e, f, g, h] = H;
+      for (let t = 0; t < 64; t++) {
+        const S1 = rotr(6, e) ^ rotr(11, e) ^ rotr(25, e);
+        const ch = (e & f) ^ (~e & g);
+        const temp1 = (h + S1 + ch + K[t] + W[t]) >>> 0;
+        const S0 = rotr(2, a) ^ rotr(13, a) ^ rotr(22, a);
+        const maj = (a & b) ^ (a & c) ^ (b & c);
+        const temp2 = (S0 + maj) >>> 0;
+        h = g; g = f; f = e;
+        e = (d + temp1) >>> 0;
+        d = c; c = b; b = a;
+        a = (temp1 + temp2) >>> 0;
+      }
+      H[0] = (H[0] + a) >>> 0;
+      H[1] = (H[1] + b) >>> 0;
+      H[2] = (H[2] + c) >>> 0;
+      H[3] = (H[3] + d) >>> 0;
+      H[4] = (H[4] + e) >>> 0;
+      H[5] = (H[5] + f) >>> 0;
+      H[6] = (H[6] + g) >>> 0;
+      H[7] = (H[7] + h) >>> 0;
+    }
+
+    return H.map(x => x.toString(16).padStart(8, '0')).join('');
+  }
+
+  // ============================================================
+  // syncAudioCache — uploads audio files to ShowPilot so it can serve
+  //                  them locally instead of proxying through FPP
+  // ============================================================
+  // For each sequence with a mediaName:
+  //   1. Read the file from FPP via /api/file/Music/<mediaName>
+  //   2. Compute SHA-256 of the bytes
+  //   3. Compare against ShowPilot's manifest (one fetch up front)
+  //   4. Upload missing files; link existing-but-renamed files
+  //
+  // Returns a status suffix string (e.g. " · uploaded 23/60 files") to
+  // append to the main sync success message. Throws if the manifest
+  // fetch fails (network error, server unreachable) — but per-file
+  // failures are caught and tallied so one bad file doesn't abort.
+  //
+  // Missing-on-FPP files are listed in a follow-up status update so the
+  // user knows about them but the sync still succeeds for everything
+  // that worked.
+  // ============================================================
+  async function syncAudioCache(serverUrl, showToken, sequences) {
+    // Filter to sequences that actually have audio. Nothing to upload
+    // for sequence-only items (no media file).
+    const withAudio = sequences.filter(s => s.mediaName);
+    if (withAudio.length === 0) {
+      return ' · no audio files to sync';
+    }
+
+    setStatus('syncStatus', 'Checking audio cache…', 'muted');
+
+    // Step 1: fetch manifest of what ShowPilot already has
+    const manifestRes = await fetch(serverUrl + '/api/plugin/audio-cache/manifest', {
+      headers: { 'Authorization': 'Bearer ' + showToken },
+    });
+    if (!manifestRes.ok) {
+      throw new Error('manifest fetch failed (' + manifestRes.status + ')');
+    }
+    const manifestData = await manifestRes.json();
+    const haveHashes = new Set(manifestData.haveHashes || []);
+
+    // Step 2: for each audio file, hash it and decide upload vs link vs skip.
+    // We do this serially rather than in parallel because the FPP web server
+    // on a Pi can choke on 30+ concurrent file reads. Sequential is slower
+    // wall-clock but actually completes; parallel might OOM the Pi.
+    let uploaded = 0;
+    let linked = 0;
+    let alreadyCached = 0;
+    const missingFromFpp = [];
+    const failed = [];
+
+    for (let i = 0; i < withAudio.length; i++) {
+      const seq = withAudio[i];
+
+      // Decide if this is a video file we need to extract audio from,
+      // or a regular audio file we can upload as-is. Detection is by
+      // extension because that's what FPP exposes via mediaName.
+      const ext = (seq.mediaName.match(/\.([^.]+)$/) || [, ''])[1].toLowerCase();
+      const isVideo = ['mp4', 'm4v', 'mov', 'mkv', 'avi', 'webm', 'wmv', 'flv'].indexOf(ext) !== -1;
+
+      setStatus('syncStatus',
+        'Audio sync ' + (i + 1) + '/' + withAudio.length + ': '
+          + (isVideo ? 'extracting audio from ' : '') + seq.mediaName,
+        'muted');
+
+      // For audio files: read directly from FPP's file endpoint.
+      // For video files: hit our extract_audio.php which streams the
+      //   audio track demuxed (no re-encode) as M4A. ShowPilot stores
+      //   the M4A bytes; viewer's Web Audio decodes AAC natively.
+      // Both paths produce `fileBuffer` (ArrayBuffer) and `uploadMime`.
+      let fileBuffer;
+      let uploadMime;
+      if (isVideo) {
+        // extract_audio.php returns audio/mp4 (M4A). Same-origin call to
+        // FPP's plugin loader; no auth needed.
+        try {
+          const extractUrl = '/plugin.php?_menu=content&plugin=showpilot'
+            + '&page=extract_audio.php&nopage=1'
+            + '&file=' + encodeURIComponent(seq.mediaName);
+          const extRes = await fetch(extractUrl);
+          if (extRes.status === 404) {
+            missingFromFpp.push(seq.mediaName);
+            continue;
+          }
+          if (!extRes.ok) {
+            const body = await extRes.text();
+            failed.push(seq.mediaName + ' (extract ' + extRes.status + ': '
+              + body.slice(0, 80) + ')');
+            continue;
+          }
+          fileBuffer = await extRes.arrayBuffer();
+          if (fileBuffer.byteLength === 0) {
+            // Extraction "succeeded" with empty body — usually means
+            // ffmpeg crashed mid-stream after sending headers. Treat
+            // as failure rather than uploading 0 bytes.
+            failed.push(seq.mediaName + ' (extract returned no data)');
+            continue;
+          }
+          uploadMime = 'audio/mpeg';
+        } catch (e) {
+          failed.push(seq.mediaName + ' (extract: ' + e.message + ')');
+          continue;
+        }
+      } else {
+        // Regular audio file. Read raw bytes from FPP.
+        try {
+          const fileRes = await fetch('/api/file/Music/' + encodeURIComponent(seq.mediaName));
+          if (fileRes.status === 404) {
+            missingFromFpp.push(seq.mediaName);
+            continue;
+          }
+          if (!fileRes.ok) {
+            failed.push(seq.mediaName + ' (FPP returned ' + fileRes.status + ')');
+            continue;
+          }
+          fileBuffer = await fileRes.arrayBuffer();
+        } catch (e) {
+          failed.push(seq.mediaName + ' (' + e.message + ')');
+          continue;
+        }
+        // Pick a sensible MIME from extension. The viewer-side decoder
+        // doesn't actually care (Web Audio sniffs the bytes), but
+        // ShowPilot stores this for completeness.
+        const mimeMap = {
+          mp3: 'audio/mpeg',
+          m4a: 'audio/mp4',
+          aac: 'audio/aac',
+          ogg: 'audio/ogg',
+          wav: 'audio/wav',
+          flac: 'audio/flac',
+        };
+        uploadMime = mimeMap[ext] || 'audio/mpeg';
+      }
+
+      // Compute SHA-256. Web crypto's `crypto.subtle.digest` is the fast
+      // native path, but it's only available in "secure contexts" — HTTPS,
+      // localhost, or file://. The plugin UI runs from FPP's HTTP server
+      // on a LAN IP, which is NOT a secure context, so crypto.subtle is
+      // undefined there. Fall back to our pure-JS implementation in that
+      // case. Native is ~50x faster but JS works everywhere.
+      const hashHex = await sha256Hex(fileBuffer);
+
+      // Decide: do we need to upload, just link, or skip entirely?
+      if (haveHashes.has(hashHex)) {
+        // ShowPilot has the bytes already. Link the mediaName to the hash
+        // so the lookup table is current — this handles the case where a
+        // file was previously uploaded under a different mediaName, or
+        // the same file is referenced by a renamed sequence.
+        try {
+          const linkRes = await fetch(serverUrl + '/api/plugin/audio-cache/link', {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Bearer ' + showToken,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ mediaName: seq.mediaName, hash: hashHex }),
+          });
+          if (linkRes.ok) {
+            linked++;
+          } else {
+            alreadyCached++;
+          }
+        } catch (e) {
+          // Linking failure is non-fatal — server still has the bytes
+          // under the old mediaName; viewer might or might not find it.
+          alreadyCached++;
+        }
+        continue;
+      }
+
+      // Upload the bytes. Body is the raw file; hash + mediaName go in
+      // query string. Server verifies hash matches the bytes on the way in.
+      try {
+        const uploadRes = await fetch(
+          serverUrl + '/api/plugin/audio-cache/upload'
+            + '?hash=' + encodeURIComponent(hashHex)
+            + '&mediaName=' + encodeURIComponent(seq.mediaName),
+          {
+            method: 'POST',
+            headers: {
+              'Authorization': 'Bearer ' + showToken,
+              'Content-Type': uploadMime,
+            },
+            body: fileBuffer,
+          }
+        );
+        if (uploadRes.ok) {
+          uploaded++;
+          // Add to local set so subsequent iterations of the same hash
+          // (e.g. duplicate audio across sequences) don't re-upload
+          haveHashes.add(hashHex);
+        } else {
+          const errBody = await uploadRes.text();
+          failed.push(seq.mediaName + ' (upload ' + uploadRes.status + ': ' + errBody.slice(0, 60) + ')');
+        }
+      } catch (e) {
+        failed.push(seq.mediaName + ' (' + e.message + ')');
+      }
+    }
+
+    // If any files were missing or failed, surface them so the user knows.
+    // Wait a tick so the success message above gets seen first (otherwise
+    // the warning replaces it before the user has a chance to read it).
+    if (missingFromFpp.length > 0 || failed.length > 0) {
+      const lines = [];
+      if (missingFromFpp.length > 0) {
+        lines.push('⚠ ' + missingFromFpp.length + ' audio file' +
+          (missingFromFpp.length === 1 ? '' : 's') + ' missing from FPP:');
+        missingFromFpp.slice(0, 10).forEach(name => lines.push('  · ' + name));
+        if (missingFromFpp.length > 10) {
+          lines.push('  · …and ' + (missingFromFpp.length - 10) + ' more');
+        }
+      }
+      if (failed.length > 0) {
+        lines.push('⚠ ' + failed.length + ' upload failure' +
+          (failed.length === 1 ? '' : 's') + ':');
+        failed.slice(0, 5).forEach(name => lines.push('  · ' + name));
+        if (failed.length > 5) {
+          lines.push('  · …and ' + (failed.length - 5) + ' more');
+        }
+      }
+      // Log full list to console for debugging; UI shows summary.
+      console.warn('Audio sync issues:\n' + lines.join('\n'));
+      // Schedule the warning to appear after the success message so users
+      // see both. setTimeout decouples this from the immediate response.
+      setTimeout(() => {
+        const warningEl = document.getElementById('syncStatus');
+        if (warningEl) {
+          // Append warning to existing success status with line break
+          const current = warningEl.textContent;
+          warningEl.innerHTML = current + '<br><span style="color: var(--of-status-warning, #f59e0b); white-space: pre-line; display: block; margin-top: 0.4rem; font-size: 0.85em;">'
+            + lines.join('\n').replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            + '</span>';
+        }
+      }, 200);
+    }
+
+    // Build the summary suffix. Goes on the main success line.
+    const parts = [];
+    if (uploaded > 0) parts.push('uploaded ' + uploaded);
+    if (linked > 0) parts.push('linked ' + linked);
+    if (alreadyCached > 0) parts.push(alreadyCached + ' already cached');
+    if (parts.length === 0) {
+      return ' · audio: no changes';
+    }
+    return ' · audio: ' + parts.join(', ');
   }
 
   // ============================================================
