@@ -35,7 +35,12 @@
 include_once "/opt/fpp/www/config.php";
 include_once "/opt/fpp/www/common.php";
 
-$mediaDir = $settings['mediaDirectory'] . '/music';
+// FPP separates audio (music/) and video (videos/) into different
+// subdirectories of the media root. We need to check both because the
+// plugin sends mediaName based on what's in the playlist — that could
+// be either folder. config.php sets these globals.
+$musicDir = isset($musicDirectory) ? $musicDirectory : $settings['mediaDirectory'] . '/music';
+$videoDir = isset($videoDirectory) ? $videoDirectory : $settings['mediaDirectory'] . '/videos';
 $logFile = $settings['logDirectory'] . '/showpilot-listener.log';
 
 function elog($msg) {
@@ -67,12 +72,19 @@ if (strpos($rawFile, '/') !== false ||
     exit;
 }
 
-$srcPath = $mediaDir . '/' . $rawFile;
-if (!file_exists($srcPath) || !is_readable($srcPath)) {
+$srcPath = null;
+foreach (array($musicDir, $videoDir) as $dir) {
+    $candidate = $dir . '/' . $rawFile;
+    if (file_exists($candidate) && is_readable($candidate)) {
+        $srcPath = $candidate;
+        break;
+    }
+}
+if ($srcPath === null) {
     http_response_code(404);
     header('Content-Type: text/plain');
-    echo "file not found";
-    elog("404 for: $rawFile");
+    echo "file not found in music or videos directory";
+    elog("404 for: $rawFile (checked music + videos)");
     exit;
 }
 
