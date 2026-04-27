@@ -540,25 +540,18 @@ while (true) {
     // is continuous fresh data, not edge-triggered like ofReportPlaying.
     // Only suppressed when nothing is playing (sequence name empty).
     //
-    // Field selection notes: FPP exposes several time fields. We try
-    // them in order of precision:
-    //   1. seconds_elapsed — float, sub-second precision (newer FPP)
-    //   2. current_song_seconds_elapsed — alias on some FPP versions
-    //   3. seconds_played — integer-rounded (older FPP, lossy for sync)
-    // Without a sub-second source, the position has up to 1000ms of
-    // jitter, which defeats the purpose of high-cadence reporting.
-    if ($currentlyPlaying !== '') {
-        $livePos = null;
-        if (isset($fppStatus->seconds_elapsed) && is_numeric($fppStatus->seconds_elapsed)) {
-            $livePos = floatval($fppStatus->seconds_elapsed);
-        } elseif (isset($fppStatus->current_song_seconds_elapsed) && is_numeric($fppStatus->current_song_seconds_elapsed)) {
-            $livePos = floatval($fppStatus->current_song_seconds_elapsed);
-        } elseif (isset($fppStatus->seconds_played) && is_numeric($fppStatus->seconds_played)) {
-            $livePos = floatval($fppStatus->seconds_played);
-        }
-        if ($livePos !== null) {
-            ofReportPosition($currentlyPlaying, $livePos);
-        }
+    // Field selection: FPP's `milliseconds_elapsed` (introduced in
+    // mid-2024 FPP versions) gives millisecond-precision playback time.
+    // The older `seconds_played` and `seconds_elapsed` fields are
+    // integer-rounded and therefore unsuitable for sub-second sync — a
+    // 1Hz integer with up to 999ms of phase error inside each tick is
+    // worse than not reporting at all for our purposes. We only report
+    // when milliseconds_elapsed is available; older FPP versions fall
+    // back to track-start extrapolation on the viewer side, which is
+    // what we had before this feature.
+    if ($currentlyPlaying !== '' && isset($fppStatus->milliseconds_elapsed)) {
+        $livePos = floatval($fppStatus->milliseconds_elapsed) / 1000.0;
+        ofReportPosition($currentlyPlaying, $livePos);
     }
 
     $nextScheduled = getNextScheduledSequence($fppStatus, $currentlyPlaying, $cfg['remotePlaylist']);
