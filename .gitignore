@@ -12,3 +12,6 @@ dist/
 # Plugin config (lives in /home/fpp/media/config/plugin.showpilot at runtime,
 # not in this repo, but ignore here just in case)
 plugin.showpilot
+
+# ShipPilot release manifest (never committed; defense in depth)
+.release.json
