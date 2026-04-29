@@ -1,7 +1,7 @@
 {
 	"repoName": "showpilot",
 	"name": "ShowPilot",
-	"author": "ShowPilot Contributors",
+	"author": "ShowPilot Project",
 	"description": "Connects FPP to a self-hosted ShowPilot server for viewer voting and jukebox control.",
 	"homeURL": "https://github.com/ShowPilotFPP/ShowPilot-plugin",
 	"srcURL": "https://github.com/ShowPilotFPP/ShowPilot-plugin.git",
