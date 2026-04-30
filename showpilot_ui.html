@@ -42,6 +42,7 @@ if (!empty(trim((string)$ps))) {
   body:has(.of-page:not(.theme-light):not(.theme-auto-light)) {
     background: #0a1428 !important;
   }
+
   body:has(.of-page.theme-light),
   body:has(.of-page.theme-auto-light) {
     background: #f5f7fb !important;
@@ -61,14 +62,14 @@ if (!empty(trim((string)$ps))) {
     --of-accent-hover: #dc2626;
     --of-accent-text: #ffffff;
     --of-success: #4ade80;
-    --of-success-soft: rgba(74,222,128,0.15);
-    --of-success-border: rgba(74,222,128,0.4);
+    --of-success-soft: rgba(74, 222, 128, 0.15);
+    --of-success-border: rgba(74, 222, 128, 0.4);
     --of-danger: #ef4444;
-    --of-danger-soft: rgba(239,68,68,0.15);
-    --of-danger-border: rgba(239,68,68,0.4);
+    --of-danger-soft: rgba(239, 68, 68, 0.15);
+    --of-danger-border: rgba(239, 68, 68, 0.4);
     --of-link: #60a5fa;
 
-    --of-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    --of-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
     --of-radius: 10px;
     --of-pill: 999px;
 
@@ -91,311 +92,600 @@ if (!empty(trim((string)$ps))) {
     padding: 1.5rem 1.75rem;
     box-shadow: var(--of-shadow);
   }
-  .of-card-header { margin-bottom: 1.5rem; }
-  .of-card-header h1 {
-    margin: 0; font-size: 1.4rem; font-weight: 700; color: var(--of-text);
-    display: flex; align-items: baseline; gap: 0.5rem;
+
+  .of-card-header {
+    margin-bottom: 1.5rem;
   }
+
+  .of-card-header h1 {
+    margin: 0;
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--of-text);
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+  }
+
   .of-back-link {
-    display: inline-block; margin-bottom: 0.75rem;
-    color: var(--of-text-muted); text-decoration: none;
-    font-size: 0.85rem; font-weight: 500;
-    padding: 0.3rem 0.75rem; border-radius: var(--of-pill);
+    display: inline-block;
+    margin-bottom: 0.75rem;
+    color: var(--of-text-muted);
+    text-decoration: none;
+    font-size: 0.85rem;
+    font-weight: 500;
+    padding: 0.3rem 0.75rem;
+    border-radius: var(--of-pill);
     border: 1px solid var(--of-border);
     background: var(--of-bg-input);
     transition: all 0.15s;
   }
+
   .of-back-link:hover {
-    color: var(--of-text); border-color: var(--of-border-hover);
+    color: var(--of-text);
+    border-color: var(--of-border-hover);
     background: var(--of-bg);
   }
+
   .of-card-subtitle {
-    margin-top: 0.3rem; font-size: 0.85rem; color: var(--of-text-muted);
+    margin-top: 0.3rem;
+    font-size: 0.85rem;
+    color: var(--of-text-muted);
   }
+
   .of-version {
-    background: var(--of-bg-input); padding: 0.1rem 0.5rem;
-    border-radius: var(--of-pill); border: 1px solid var(--of-border);
-    color: var(--of-text-dim); font-size: 0.78rem; font-weight: 500;
+    background: var(--of-bg-input);
+    padding: 0.1rem 0.5rem;
+    border-radius: var(--of-pill);
+    border: 1px solid var(--of-border);
+    color: var(--of-text-dim);
+    font-size: 0.78rem;
+    font-weight: 500;
   }
+
   /* Light theme — applied via .theme-light class on .of-page (toggleable),
      with prefers-color-scheme auto-fallback for users who never toggle. */
   .of-page.theme-light,
   .of-page.theme-auto-light {
-      --of-bg: #f5f7fb;
-      --of-bg-elevated: #ffffff;
-      --of-bg-input: #ffffff;
-      --of-border: #d8dfeb;
-      --of-border-hover: #b0bbcd;
-      --of-text: #1a2c4f;
-      --of-text-muted: #5a6a85;
-      --of-text-dim: #8b9bb4;
-      --of-accent: #dc2626;
-      --of-accent-hover: #b91c1c;
-      --of-success: #16a34a;
-      --of-success-soft: rgba(22,163,74,0.10);
-      --of-success-border: rgba(22,163,74,0.30);
-      --of-danger: #dc2626;
-      --of-danger-soft: rgba(220,38,38,0.08);
-      --of-danger-border: rgba(220,38,38,0.30);
-      --of-link: #2563eb;
-      --of-shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+    --of-bg: #f5f7fb;
+    --of-bg-elevated: #ffffff;
+    --of-bg-input: #ffffff;
+    --of-border: #d8dfeb;
+    --of-border-hover: #b0bbcd;
+    --of-text: #1a2c4f;
+    --of-text-muted: #5a6a85;
+    --of-text-dim: #8b9bb4;
+    --of-accent: #dc2626;
+    --of-accent-hover: #b91c1c;
+    --of-success: #16a34a;
+    --of-success-soft: rgba(22, 163, 74, 0.10);
+    --of-success-border: rgba(22, 163, 74, 0.30);
+    --of-danger: #dc2626;
+    --of-danger-soft: rgba(220, 38, 38, 0.08);
+    --of-danger-border: rgba(220, 38, 38, 0.30);
+    --of-link: #2563eb;
+    --of-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
   }
 
   /* Theme toggle button — top-right of card header, like admin */
-  .of-card-header { position: relative; }
-  .of-theme-toggle {
-    position: absolute; top: 0; right: 0;
-    background: transparent; border: 1px solid var(--of-border);
-    color: var(--of-text-muted); padding: 0.35rem 0.6rem;
-    border-radius: var(--of-pill); font-size: 0.95rem;
-    cursor: pointer; line-height: 1; transition: all 0.15s;
+  .of-card-header {
+    position: relative;
   }
+
+  .of-theme-toggle {
+    position: absolute;
+    top: 0;
+    right: 0;
+    background: transparent;
+    border: 1px solid var(--of-border);
+    color: var(--of-text-muted);
+    padding: 0.35rem 0.6rem;
+    border-radius: var(--of-pill);
+    font-size: 0.95rem;
+    cursor: pointer;
+    line-height: 1;
+    transition: all 0.15s;
+  }
+
   .of-theme-toggle:hover {
-    color: var(--of-text); border-color: var(--of-border-hover);
+    color: var(--of-text);
+    border-color: var(--of-border-hover);
     background: var(--of-bg-input);
   }
 
-  .of-page h2 { font-size: 1.05rem; font-weight: 600; color: var(--of-accent);
-                margin: 2rem 0 0.5rem; text-align: center; letter-spacing: 0.02em; }
-
-  .of-banner { padding: 1rem 1.25rem; border-radius: var(--of-radius); text-align: center;
-               font-weight: 600; font-size: 1rem; margin-bottom: 1.5rem;
-               border: 1px solid; display: flex; align-items: center; justify-content: center; gap: 0.5rem; }
-  .of-banner.running { background: var(--of-success-soft); color: var(--of-success);
-                       border-color: var(--of-success-border); }
-  .of-banner.stopped { background: var(--of-danger-soft); color: var(--of-danger);
-                       border-color: var(--of-danger-border); }
-  .of-banner::before {
-    content: ""; width: 0.6rem; height: 0.6rem; border-radius: 50%;
-    background: currentColor; box-shadow: 0 0 8px currentColor;
+  .of-page h2 {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--of-accent);
+    margin: 2rem 0 0.5rem;
+    text-align: center;
+    letter-spacing: 0.02em;
   }
 
-  .of-section-header { text-align: center; padding-top: 0.5rem; }
-  .of-section-header h2 { display: inline-block; margin: 0; }
-  .of-section-header .of-section-sub { display: block; font-size: 0.85rem;
-                                        color: var(--of-text-muted); font-weight: 400;
-                                        margin-top: 0.25rem; }
+  .of-banner {
+    padding: 1rem 1.25rem;
+    border-radius: var(--of-radius);
+    text-align: center;
+    font-weight: 600;
+    font-size: 1rem;
+    margin-bottom: 1.5rem;
+    border: 1px solid;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+  }
+
+  .of-banner.running {
+    background: var(--of-success-soft);
+    color: var(--of-success);
+    border-color: var(--of-success-border);
+  }
+
+  .of-banner.stopped {
+    background: var(--of-danger-soft);
+    color: var(--of-danger);
+    border-color: var(--of-danger-border);
+  }
+
+  .of-banner::before {
+    content: "";
+    width: 0.6rem;
+    height: 0.6rem;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 8px currentColor;
+  }
+
+  .of-section-header {
+    text-align: center;
+    padding-top: 0.5rem;
+  }
+
+  .of-section-header h2 {
+    display: inline-block;
+    margin: 0;
+  }
+
+  .of-section-header .of-section-sub {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--of-text-muted);
+    font-weight: 400;
+    margin-top: 0.25rem;
+  }
 
   /* Plugin page tabs */
   .of-tabs {
-    display: flex; flex-wrap: wrap; gap: 0.25rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
     border-bottom: 1px solid var(--of-border);
     margin: 1.25rem 0 0.5rem;
     padding: 0;
   }
+
   .of-tab-btn {
-    background: transparent; border: 0; padding: 0.6rem 1rem;
-    color: var(--of-text-muted); font-size: 0.9rem; font-weight: 500;
-    cursor: pointer; border-radius: 6px 6px 0 0;
+    background: transparent;
+    border: 0;
+    padding: 0.6rem 1rem;
+    color: var(--of-text-muted);
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    border-radius: 6px 6px 0 0;
     border-bottom: 2px solid transparent;
-    transition: all 0.15s; font-family: inherit;
+    transition: all 0.15s;
+    font-family: inherit;
     margin-bottom: -1px;
   }
-  .of-tab-btn:hover { color: var(--of-text); background: var(--of-bg-input); }
+
+  .of-tab-btn:hover {
+    color: var(--of-text);
+    background: var(--of-bg-input);
+  }
+
   .of-tab-btn.active {
     color: var(--of-accent);
     border-bottom-color: var(--of-accent);
     font-weight: 600;
   }
-  .of-tab-pane { display: none; }
-  .of-tab-pane.active { display: block; }
-  /* Hide tab section headers since the tab itself indicates the section */
-  .of-tab-pane > .of-section-header:first-child { display: none; }
 
-  .of-row { display: grid; grid-template-columns: 1fr 1.4fr; gap: 1.25rem;
-            padding: 1.1rem 0; border-bottom: 1px solid var(--of-border); align-items: start; }
-  .of-row:last-child { border-bottom: none; }
-  .of-row .of-label { font-weight: 600; font-size: 0.95rem; color: var(--of-text); }
-  .of-row .of-help { color: var(--of-text-muted); font-size: 0.85rem;
-                     line-height: 1.5; margin-top: 0.3rem; }
+  .of-tab-pane {
+    display: none;
+  }
+
+  .of-tab-pane.active {
+    display: block;
+  }
+
+  /* Hide tab section headers since the tab itself indicates the section */
+  .of-tab-pane>.of-section-header:first-child {
+    display: none;
+  }
+
+  .of-row {
+    display: grid;
+    grid-template-columns: 1fr 1.4fr;
+    gap: 1.25rem;
+    padding: 1.1rem 0;
+    border-bottom: 1px solid var(--of-border);
+    align-items: start;
+  }
+
+  .of-row:last-child {
+    border-bottom: none;
+  }
+
+  .of-row .of-label {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--of-text);
+  }
+
+  .of-row .of-help {
+    color: var(--of-text-muted);
+    font-size: 0.85rem;
+    line-height: 1.5;
+    margin-top: 0.3rem;
+  }
+
   .of-row .of-help code {
-    background: var(--of-bg-elevated); color: var(--of-text);
-    padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.85em;
+    background: var(--of-bg-elevated);
+    color: var(--of-text);
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.85em;
     border: 1px solid var(--of-border);
     font-family: ui-monospace, Menlo, Consolas, monospace;
   }
-  .of-row .of-help.warn { color: var(--of-accent); font-weight: 600; }
-  .of-row .of-control { display: flex; flex-direction: column; gap: 0.5rem; }
 
-  .of-input, .of-select, .of-textarea {
-    width: 100%; padding: 0.6rem 0.75rem;
-    border: 1px solid var(--of-border); border-radius: 6px;
-    font-size: 0.95rem; font-family: inherit;
-    background: var(--of-bg-input); color: var(--of-text);
+  .of-row .of-help.warn {
+    color: var(--of-accent);
+    font-weight: 600;
+  }
+
+  .of-row .of-control {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .of-input,
+  .of-select,
+  .of-textarea {
+    width: 100%;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid var(--of-border);
+    border-radius: 6px;
+    font-size: 0.95rem;
+    font-family: inherit;
+    background: var(--of-bg-input);
+    color: var(--of-text);
     transition: border-color 0.15s, box-shadow 0.15s;
   }
-  .of-input:focus, .of-select:focus, .of-textarea:focus {
-    outline: none; border-color: var(--of-accent);
+
+  .of-input:focus,
+  .of-select:focus,
+  .of-textarea:focus {
+    outline: none;
+    border-color: var(--of-accent);
     box-shadow: 0 0 0 3px var(--of-danger-soft);
   }
-  .of-input::placeholder { color: var(--of-text-dim); }
-  .of-textarea { min-height: 200px; font-family: ui-monospace, Menlo, Consolas, monospace;
-                 font-size: 0.85rem; line-height: 1.5; }
+
+  .of-input::placeholder {
+    color: var(--of-text-dim);
+  }
+
+  .of-textarea {
+    min-height: 200px;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 0.85rem;
+    line-height: 1.5;
+  }
 
   /* Toggle switch — themed accent + neutral track */
-  .of-toggle { position: relative; display: inline-block; width: 52px; height: 28px; cursor: pointer; }
-  .of-toggle input { opacity: 0; width: 0; height: 0; }
+  .of-toggle {
+    position: relative;
+    display: inline-block;
+    width: 52px;
+    height: 28px;
+    cursor: pointer;
+  }
+
+  .of-toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
   .of-toggle-slider {
-    position: absolute; inset: 0; background: var(--of-border); border-radius: 28px;
-    transition: 0.2s; display: flex; align-items: center; padding: 0 7px;
-    color: var(--of-text-muted); font-size: 12px; font-weight: bold;
+    position: absolute;
+    inset: 0;
+    background: var(--of-border);
+    border-radius: 28px;
+    transition: 0.2s;
+    display: flex;
+    align-items: center;
+    padding: 0 7px;
+    color: var(--of-text-muted);
+    font-size: 12px;
+    font-weight: bold;
   }
-  .of-toggle-slider::before { content: "OFF"; margin-left: auto; font-size: 9px; letter-spacing: 0.05em; }
+
+  .of-toggle-slider::before {
+    content: "OFF";
+    margin-left: auto;
+    font-size: 9px;
+    letter-spacing: 0.05em;
+  }
+
   .of-toggle-slider::after {
-    content: ""; position: absolute; height: 20px; width: 20px; left: 4px; bottom: 4px;
-    background: white; border-radius: 50%; transition: 0.2s;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    content: "";
+    position: absolute;
+    height: 20px;
+    width: 20px;
+    left: 4px;
+    bottom: 4px;
+    background: white;
+    border-radius: 50%;
+    transition: 0.2s;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
   }
-  .of-toggle input:checked + .of-toggle-slider { background: var(--of-accent); color: white; }
-  .of-toggle input:checked + .of-toggle-slider::before {
-    content: "ON"; margin-left: 0; margin-right: auto; font-size: 9px; letter-spacing: 0.05em;
+
+  .of-toggle input:checked+.of-toggle-slider {
+    background: var(--of-accent);
+    color: white;
   }
-  .of-toggle input:checked + .of-toggle-slider::after { transform: translateX(24px); }
+
+  .of-toggle input:checked+.of-toggle-slider::before {
+    content: "ON";
+    margin-left: 0;
+    margin-right: auto;
+    font-size: 9px;
+    letter-spacing: 0.05em;
+  }
+
+  .of-toggle input:checked+.of-toggle-slider::after {
+    transform: translateX(24px);
+  }
 
   .of-btn {
-    display: inline-block; padding: 0.5rem 1rem; border-radius: var(--of-pill);
-    font-size: 0.9rem; font-weight: 600; cursor: pointer; border: 1px solid;
-    background: transparent; transition: all 0.15s; text-decoration: none;
+    display: inline-block;
+    padding: 0.5rem 1rem;
+    border-radius: var(--of-pill);
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid;
+    background: transparent;
+    transition: all 0.15s;
+    text-decoration: none;
     font-family: inherit;
   }
-  .of-btn-primary { color: var(--of-accent); border-color: var(--of-accent); }
-  .of-btn-primary:hover { background: var(--of-accent); color: var(--of-accent-text); }
-  .of-btn-success { color: var(--of-success); border-color: var(--of-success); }
-  .of-btn-success:hover { background: var(--of-success); color: var(--of-bg); }
-  .of-btn-danger { color: var(--of-danger); border-color: var(--of-danger); }
-  .of-btn-danger:hover { background: var(--of-danger); color: white; }
-  .of-btn-neutral { color: var(--of-text); border-color: var(--of-border-hover); }
-  .of-btn-neutral:hover { background: var(--of-bg-elevated); border-color: var(--of-text-muted); }
 
-  .of-btn-group { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
-  .of-status { font-size: 0.85rem; }
-  .of-status.success { color: var(--of-success); font-weight: 600; }
-  .of-status.error { color: var(--of-danger); font-weight: 600; }
-  .of-status.muted { color: var(--of-text-muted); }
+  .of-btn-primary {
+    color: var(--of-accent);
+    border-color: var(--of-accent);
+  }
+
+  .of-btn-primary:hover {
+    background: var(--of-accent);
+    color: var(--of-accent-text);
+  }
+
+  .of-btn-success {
+    color: var(--of-success);
+    border-color: var(--of-success);
+  }
+
+  .of-btn-success:hover {
+    background: var(--of-success);
+    color: var(--of-bg);
+  }
+
+  .of-btn-danger {
+    color: var(--of-danger);
+    border-color: var(--of-danger);
+  }
+
+  .of-btn-danger:hover {
+    background: var(--of-danger);
+    color: white;
+  }
+
+  .of-btn-neutral {
+    color: var(--of-text);
+    border-color: var(--of-border-hover);
+  }
+
+  .of-btn-neutral:hover {
+    background: var(--of-bg-elevated);
+    border-color: var(--of-text-muted);
+  }
+
+  .of-btn-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+  }
+
+  .of-status {
+    font-size: 0.85rem;
+  }
+
+  .of-status.success {
+    color: var(--of-success);
+    font-weight: 600;
+  }
+
+  .of-status.error {
+    color: var(--of-danger);
+    font-weight: 600;
+  }
+
+  .of-status.muted {
+    color: var(--of-text-muted);
+  }
 
   .of-log-output {
-    background: var(--of-bg-input); color: var(--of-text);
-    border: 1px solid var(--of-border); border-radius: var(--of-radius);
-    padding: 1rem; font-family: ui-monospace, Menlo, Consolas, monospace;
-    font-size: 0.78rem; white-space: pre-wrap; word-break: break-all;
-    max-height: 320px; overflow-y: auto; line-height: 1.5;
+    background: var(--of-bg-input);
+    color: var(--of-text);
+    border: 1px solid var(--of-border);
+    border-radius: var(--of-radius);
+    padding: 1rem;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 0.78rem;
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 320px;
+    overflow-y: auto;
+    line-height: 1.5;
   }
+
   .of-log-output:empty::before {
     content: "Click \"Tail Log\" to load recent log lines.";
-    color: var(--of-text-dim); font-style: italic;
+    color: var(--of-text-dim);
+    font-style: italic;
   }
 
   .of-page-footer {
-    text-align: center; font-size: 0.85rem; color: var(--of-text-muted);
-    margin-top: 2rem; padding-top: 1.25rem; border-top: 1px solid var(--of-border);
+    text-align: center;
+    font-size: 0.85rem;
+    color: var(--of-text-muted);
+    margin-top: 2rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--of-border);
   }
-  .of-page-footer a { color: var(--of-link); text-decoration: none; }
-  .of-page-footer a:hover { text-decoration: underline; }
+
+  .of-page-footer a {
+    color: var(--of-link);
+    text-decoration: none;
+  }
+
+  .of-page-footer a:hover {
+    text-decoration: underline;
+  }
 
   @media (max-width: 720px) {
-    .of-row { grid-template-columns: 1fr; gap: 0.5rem; }
-    .of-page { padding: 1rem 0.75rem; }
+    .of-row {
+      grid-template-columns: 1fr;
+      gap: 0.5rem;
+    }
+
+    .of-page {
+      padding: 1rem 0.75rem;
+    }
   }
 </style>
 
 <div class="of-page">
   <div class="of-card">
 
-  <div class="of-card-header">
-    <button type="button" class="of-theme-toggle" id="ofThemeToggle" onclick="toggleOfTheme()" title="Toggle light/dark">◐</button>
-    <a href="/" class="of-back-link" title="Return to FPP main page">&larr; Back to FPP</a>
-    <h1>ShowPilot Plugin Configuration</h1>
-    <div class="of-card-subtitle">Manage your connection, playlist, and listener &middot; <span class="of-version">v<?php echo htmlspecialchars($pluginVersion); ?></span></div>
-  </div>
-
-  <!-- ============================================ -->
-  <!-- LISTENER STATUS BANNER                       -->
-  <!-- ============================================ -->
-  <div id="listenerBanner" class="of-banner <?php echo $listenerRunning ? 'running' : 'stopped'; ?>">
-    <?php echo $listenerRunning ? 'ShowPilot Listener is Running' : 'ShowPilot Listener is Stopped'; ?>
-  </div>
-
-  <!-- Tab navigation -->
-  <div class="of-tabs" role="tablist">
-    <button type="button" class="of-tab-btn active" data-tab="server"      onclick="ofSwitchTab('server')">Server</button>
-    <button type="button" class="of-tab-btn"        data-tab="playlist"    onclick="ofSwitchTab('playlist')">Playlist</button>
-    <button type="button" class="of-tab-btn"        data-tab="behavior"    onclick="ofSwitchTab('behavior')">Behavior</button>
-    <button type="button" class="of-tab-btn"        data-tab="listener"    onclick="ofSwitchTab('listener')">Listener</button>
-    <button type="button" class="of-tab-btn"        data-tab="diagnostics" onclick="ofSwitchTab('diagnostics')">Diagnostics</button>
-    <button type="button" class="of-tab-btn"        data-tab="developer"   onclick="ofSwitchTab('developer')">Developer</button>
-  </div>
-
-  <!-- ============================================ -->
-  <!-- TAB: SERVER CONNECTION                       -->
-  <!-- ============================================ -->
-  <div class="of-tab-pane active" data-tab-pane="server">
-  <div class="of-section-header">
-    <h2>Server Connection</h2>
-  </div>
-
-  <div class="of-help warn" style="margin: 0 0 1rem; padding: 0.75rem 0.85rem; border-left: 3px solid var(--of-accent); background: rgba(248, 123, 2, 0.08); border-radius: 4px; display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; justify-content: space-between;">
-    <div style="flex: 1; min-width: 280px;">
-      <strong>Heads up:</strong> Changes to <em>Server URL</em> or <em>Show Token</em> only take effect after the listener restarts.
+    <div class="of-card-header">
+      <button type="button" class="of-theme-toggle" id="ofThemeToggle" onclick="toggleOfTheme()"
+        title="Toggle light/dark">◐</button>
+      <a href="/" class="of-back-link" title="Return to FPP main page">&larr; Back to FPP</a>
+      <h1>ShowPilot Plugin Configuration</h1>
+      <div class="of-card-subtitle">Manage your connection, playlist, and listener &middot; <span class="of-version">v
+          <?php echo htmlspecialchars($pluginVersion); ?>
+        </span></div>
     </div>
-    <div style="display: flex; align-items: center; gap: 0.5rem;">
-      <button type="button" class="of-btn of-btn-primary" onclick="restartListener();" style="white-space: nowrap;">Restart Listener</button>
-      <span id="restartStatusServer" class="of-status muted"></span>
-    </div>
-  </div>
 
-  <div class="of-row">
-    <div>
-      <div class="of-label">Server URL</div>
-      <div class="of-help">
-        Where your self-hosted ShowPilot server is reachable.
-        e.g. <code>http://192.168.1.230:3100</code> or <code>https://lights.yourdomain.com</code>.
-        No trailing slash.
+    <!-- ============================================ -->
+    <!-- LISTENER STATUS BANNER                       -->
+    <!-- ============================================ -->
+    <div id="listenerBanner" class="of-banner <?php echo $listenerRunning ? 'running' : 'stopped'; ?>">
+      <?php echo $listenerRunning ? 'ShowPilot Listener is Running' : 'ShowPilot Listener is Stopped'; ?>
+    </div>
+
+    <!-- Tab navigation -->
+    <div class="of-tabs" role="tablist">
+      <button type="button" class="of-tab-btn active" data-tab="server" onclick="ofSwitchTab('server')">Server</button>
+      <button type="button" class="of-tab-btn" data-tab="playlist" onclick="ofSwitchTab('playlist')">Playlist</button>
+      <button type="button" class="of-tab-btn" data-tab="behavior" onclick="ofSwitchTab('behavior')">Behavior</button>
+      <button type="button" class="of-tab-btn" data-tab="listener" onclick="ofSwitchTab('listener')">Listener</button>
+      <button type="button" class="of-tab-btn" data-tab="diagnostics"
+        onclick="ofSwitchTab('diagnostics')">Diagnostics</button>
+      <button type="button" class="of-tab-btn" data-tab="developer"
+        onclick="ofSwitchTab('developer')">Developer</button>
+    </div>
+
+    <!-- ============================================ -->
+    <!-- TAB: SERVER CONNECTION                       -->
+    <!-- ============================================ -->
+    <div class="of-tab-pane active" data-tab-pane="server">
+      <div class="of-section-header">
+        <h2>Server Connection</h2>
       </div>
-    </div>
-    <div class="of-control">
-      <input type="text" class="of-input" id="serverUrl"
-             value="<?php echo htmlspecialchars(val($pluginSettings, 'serverUrl')); ?>"
-             onchange="SetPluginSetting('<?php echo $pluginName; ?>','serverUrl',encodeURIComponent(this.value));" />
-    </div>
-  </div>
 
-  <div class="of-row">
-    <div>
-      <div class="of-label">Show Token</div>
-      <div class="of-help">
-        Copy this from your ShowPilot admin dashboard
-        ("Show Token (for ShowPilot Plugin)" section).
+      <div class="of-help warn"
+        style="margin: 0 0 1rem; padding: 0.75rem 0.85rem; border-left: 3px solid var(--of-accent); background: rgba(248, 123, 2, 0.08); border-radius: 4px; display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; justify-content: space-between;">
+        <div style="flex: 1; min-width: 280px;">
+          <strong>Heads up:</strong> Changes to <em>Server URL</em> or <em>Show Token</em> only take effect after the
+          listener restarts.
+        </div>
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <button type="button" class="of-btn of-btn-primary" onclick="restartListener();"
+            style="white-space: nowrap;">Restart Listener</button>
+          <span id="restartStatusServer" class="of-status muted"></span>
+        </div>
       </div>
-    </div>
-    <div class="of-control">
-      <input type="text" class="of-input" id="showToken"
-             value="<?php echo htmlspecialchars(val($pluginSettings, 'showToken')); ?>"
-             onchange="SetPluginSetting('<?php echo $pluginName; ?>','showToken',encodeURIComponent(this.value));" />
-    </div>
-  </div>
 
-  </div><!-- /tab: server -->
-
-  <!-- ============================================ -->
-  <!-- TAB: PLAYLIST SETUP                          -->
-  <!-- ============================================ -->
-  <div class="of-tab-pane" data-tab-pane="playlist">
-  <div class="of-section-header">
-    <h2>Playlist Setup</h2>
-  </div>
-
-  <div class="of-row">
-    <div>
-      <div class="of-label">Remote Playlist</div>
-      <div class="of-help">
-        The FPP playlist that contains the pool of sequences your viewers can vote for or request.
+      <div class="of-row">
+        <div>
+          <div class="of-label">Server URL</div>
+          <div class="of-help">
+            Where your self-hosted ShowPilot server is reachable.
+            e.g. <code>http://192.168.1.230:3100</code> or <code>https://lights.yourdomain.com</code>.
+            No trailing slash.
+          </div>
+        </div>
+        <div class="of-control">
+          <input type="text" class="of-input" id="serverUrl"
+            value="<?php echo htmlspecialchars(val($pluginSettings, 'serverUrl')); ?>"
+            onchange="SetPluginSetting('<?php echo $pluginName; ?>','serverUrl',encodeURIComponent(this.value));" />
+        </div>
       </div>
-    </div>
-    <div class="of-control">
-      <select class="of-select" id="remotePlaylist"
-              onchange="SetPluginSetting('<?php echo $pluginName; ?>','remotePlaylist',encodeURIComponent(this.value));">
-        <option value="">-- Select a playlist --</option>
-        <?php
+
+      <div class="of-row">
+        <div>
+          <div class="of-label">Show Token</div>
+          <div class="of-help">
+            Copy this from your ShowPilot admin dashboard
+            ("Show Token (for ShowPilot Plugin)" section).
+          </div>
+        </div>
+        <div class="of-control">
+          <input type="text" class="of-input" id="showToken"
+            value="<?php echo htmlspecialchars(val($pluginSettings, 'showToken')); ?>"
+            onchange="SetPluginSetting('<?php echo $pluginName; ?>','showToken',encodeURIComponent(this.value));" />
+        </div>
+      </div>
+
+    </div><!-- /tab: server -->
+
+    <!-- ============================================ -->
+    <!-- TAB: PLAYLIST SETUP                          -->
+    <!-- ============================================ -->
+    <div class="of-tab-pane" data-tab-pane="playlist">
+      <div class="of-section-header">
+        <h2>Playlist Setup</h2>
+      </div>
+
+      <div class="of-row">
+        <div>
+          <div class="of-label">Remote Playlist</div>
+          <div class="of-help">
+            The FPP playlist that contains the pool of sequences your viewers can vote for or request.
+          </div>
+        </div>
+        <div class="of-control">
+          <select class="of-select" id="remotePlaylist"
+            onchange="SetPluginSetting('<?php echo $pluginName; ?>','remotePlaylist',encodeURIComponent(this.value));">
+            <option value="">-- Select a playlist --</option>
+            <?php
         $currentPlaylist = val($pluginSettings, 'remotePlaylist');
         $playlists = @scandir($settings['playlistDirectory']);
         if ($playlists) {
@@ -408,250 +698,259 @@ if (!empty(trim((string)$ps))) {
             }
         }
         ?>
-      </select>
-    </div>
-  </div>
-
-  <div class="of-row">
-    <div>
-      <div class="of-label">Sync Sequences with ShowPilot</div>
-      <div class="of-help">
-        Reads the selected playlist and pushes its sequences to ShowPilot.
-        Run this whenever you add or remove sequences from the playlist.
+          </select>
+        </div>
       </div>
-    </div>
-    <div class="of-control">
-      <div class="of-btn-group">
-        <button type="button" class="of-btn of-btn-primary" onclick="syncPlaylist();">Sync Now</button>
-        <span id="syncStatus" class="of-status muted"></span>
+
+      <div class="of-row">
+        <div>
+          <div class="of-label">Sync Sequences with ShowPilot</div>
+          <div class="of-help">
+            Reads the selected playlist and pushes its sequences to ShowPilot.
+            Run this whenever you add or remove sequences from the playlist.
+          </div>
+        </div>
+        <div class="of-control">
+          <div class="of-btn-group">
+            <button type="button" class="of-btn of-btn-primary" onclick="syncPlaylist();">Sync Now</button>
+            <span id="syncStatus" class="of-status muted"></span>
+          </div>
+          <label
+            style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.6rem; font-size: 0.88rem; color: var(--of-text-muted); cursor: pointer;">
+            <input type="checkbox" id="syncMetadataCheckbox" checked style="cursor: pointer;">
+            Read MP3 tags during sync (slower, but uses real song titles &amp; artists)
+          </label>
+          <label
+            style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem; font-size: 0.88rem; color: var(--of-text-muted); cursor: pointer;">
+            <input type="checkbox" id="syncAudioCheckbox" checked style="cursor: pointer;">
+            Upload audio files to ShowPilot (recommended &mdash; serves audio from ShowPilot instead of FPP, much faster
+            &amp; scales to many viewers)
+          </label>
+        </div>
       </div>
-      <label style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.6rem; font-size: 0.88rem; color: var(--of-text-muted); cursor: pointer;">
-        <input type="checkbox" id="syncMetadataCheckbox" checked style="cursor: pointer;">
-        Read MP3 tags during sync (slower, but uses real song titles &amp; artists)
-      </label>
-      <label style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem; font-size: 0.88rem; color: var(--of-text-muted); cursor: pointer;">
-        <input type="checkbox" id="syncAudioCheckbox" checked style="cursor: pointer;">
-        Upload audio files to ShowPilot (recommended &mdash; serves audio from ShowPilot instead of FPP, much faster &amp; scales to many viewers)
-      </label>
-    </div>
-  </div>
 
-  </div><!-- /tab: playlist -->
+    </div><!-- /tab: playlist -->
 
-  <!-- ============================================ -->
-  <!-- TAB: BEHAVIOR                                -->
-  <!-- ============================================ -->
-  <div class="of-tab-pane" data-tab-pane="behavior">
-  <div class="of-section-header">
-    <h2>Behavior</h2>
-  </div>
-
-  <div class="of-row">
-    <div>
-      <div class="of-label">Interrupt Schedule</div>
-      <div class="of-help">
-        Determines if a request or vote will interrupt the normal schedule.
-        Required if your remote playlist is a separate "pool" of viewer-controllable songs
-        (rather than the playlist that's currently playing).
+    <!-- ============================================ -->
+    <!-- TAB: BEHAVIOR                                -->
+    <!-- ============================================ -->
+    <div class="of-tab-pane" data-tab-pane="behavior">
+      <div class="of-section-header">
+        <h2>Behavior</h2>
       </div>
-    </div>
-    <div class="of-control">
-      <label class="of-toggle">
-        <input type="checkbox" id="interruptSchedule"
-               <?php echo (val($pluginSettings, 'interruptSchedule') === 'true') ? 'checked' : ''; ?>
-               onchange="SetPluginSetting('<?php echo $pluginName; ?>','interruptSchedule',encodeURIComponent(this.checked ? 'true' : 'false'));" />
-        <span class="of-toggle-slider"></span>
-      </label>
-    </div>
-  </div>
 
-  <div class="of-row">
-    <div>
-      <div class="of-label">Request/Vote Fetch Time</div>
-      <div class="of-help">
-        Number of seconds before the end of the current sequence to fetch the next vote winner / jukebox request.
-        Default: <code>3</code>. Range: 1–5.
+      <div class="of-row">
+        <div>
+          <div class="of-label">Interrupt Schedule</div>
+          <div class="of-help">
+            Determines if a request or vote will interrupt the normal schedule.
+            Required if your remote playlist is a separate "pool" of viewer-controllable songs
+            (rather than the playlist that's currently playing).
+          </div>
+        </div>
+        <div class="of-control">
+          <label class="of-toggle">
+            <input type="checkbox" id="interruptSchedule" <?php echo (val($pluginSettings, 'interruptSchedule'
+              )==='true' ) ? 'checked' : '' ; ?>
+            onchange="SetPluginSetting('
+            <?php echo $pluginName; ?>','interruptSchedule',encodeURIComponent(this.checked ? 'true' : 'false'));" />
+            <span class="of-toggle-slider"></span>
+          </label>
+        </div>
       </div>
-    </div>
-    <div class="of-control">
-      <input type="number" class="of-input" id="requestFetchTime" min="1" max="5"
-             value="<?php echo htmlspecialchars(val($pluginSettings, 'requestFetchTime', '3')); ?>"
-             onchange="SetPluginSetting('<?php echo $pluginName; ?>','requestFetchTime',encodeURIComponent(this.value));" />
-    </div>
-  </div>
 
-  <div class="of-row">
-    <div>
-      <div class="of-label">Additional Wait Time</div>
-      <div class="of-help">
-        Extra seconds to wait after queuing a sequence before checking for the next one.
-        Helpful if you're seeing requests get skipped or duplicated.
-        Default: <code>0</code>.
+      <div class="of-row">
+        <div>
+          <div class="of-label">Request/Vote Fetch Time</div>
+          <div class="of-help">
+            Number of seconds before the end of the current sequence to fetch the next vote winner / jukebox request.
+            Default: <code>3</code>. Range: 1–5.
+          </div>
+        </div>
+        <div class="of-control">
+          <input type="number" class="of-input" id="requestFetchTime" min="1" max="5"
+            value="<?php echo htmlspecialchars(val($pluginSettings, 'requestFetchTime', '3')); ?>"
+            onchange="SetPluginSetting('<?php echo $pluginName; ?>','requestFetchTime',encodeURIComponent(this.value));" />
+        </div>
       </div>
-    </div>
-    <div class="of-control">
-      <input type="number" class="of-input" id="additionalWaitTime" min="0" max="10"
-             value="<?php echo htmlspecialchars(val($pluginSettings, 'additionalWaitTime', '0')); ?>"
-             onchange="SetPluginSetting('<?php echo $pluginName; ?>','additionalWaitTime',encodeURIComponent(this.value));" />
-    </div>
-  </div>
 
-  <div class="of-row">
-    <div>
-      <div class="of-label">FPP Status Check Time</div>
-      <div class="of-help">
-        How often the plugin polls FPP's status API.
-        Lower = more responsive, higher CPU. Default: <code>1</code> (second).
+      <div class="of-row">
+        <div>
+          <div class="of-label">Additional Wait Time</div>
+          <div class="of-help">
+            Extra seconds to wait after queuing a sequence before checking for the next one.
+            Helpful if you're seeing requests get skipped or duplicated.
+            Default: <code>0</code>.
+          </div>
+        </div>
+        <div class="of-control">
+          <input type="number" class="of-input" id="additionalWaitTime" min="0" max="10"
+            value="<?php echo htmlspecialchars(val($pluginSettings, 'additionalWaitTime', '0')); ?>"
+            onchange="SetPluginSetting('<?php echo $pluginName; ?>','additionalWaitTime',encodeURIComponent(this.value));" />
+        </div>
       </div>
-    </div>
-    <div class="of-control">
-      <input type="number" class="of-input" id="fppStatusCheckTime" min="1" max="5"
-             value="<?php echo htmlspecialchars(val($pluginSettings, 'fppStatusCheckTime', '1')); ?>"
-             onchange="SetPluginSetting('<?php echo $pluginName; ?>','fppStatusCheckTime',encodeURIComponent(this.value));" />
-    </div>
-  </div>
 
-  </div><!-- /tab: behavior -->
-
-  <!-- ============================================ -->
-  <!-- TAB: LISTENER CONTROL                        -->
-  <!-- ============================================ -->
-  <div class="of-tab-pane" data-tab-pane="listener">
-  <div class="of-section-header">
-    <h2>Listener Control</h2>
-  </div>
-
-  <div class="of-row">
-    <div>
-      <div class="of-label">Restart Listener</div>
-      <div class="of-help">
-        Reloads the plugin config and restarts the polling loop.
-        Run this after changing config values via "Plugin Config" below.
+      <div class="of-row">
+        <div>
+          <div class="of-label">FPP Status Check Time</div>
+          <div class="of-help">
+            How often the plugin polls FPP's status API.
+            Lower = more responsive, higher CPU. Default: <code>1</code> (second).
+          </div>
+        </div>
+        <div class="of-control">
+          <input type="number" class="of-input" id="fppStatusCheckTime" min="1" max="5"
+            value="<?php echo htmlspecialchars(val($pluginSettings, 'fppStatusCheckTime', '1')); ?>"
+            onchange="SetPluginSetting('<?php echo $pluginName; ?>','fppStatusCheckTime',encodeURIComponent(this.value));" />
+        </div>
       </div>
-    </div>
-    <div class="of-control">
-      <div class="of-btn-group">
-        <button type="button" class="of-btn of-btn-primary" onclick="restartListener();">Restart Listener</button>
-        <span id="restartStatus" class="of-status muted"></span>
+
+    </div><!-- /tab: behavior -->
+
+    <!-- ============================================ -->
+    <!-- TAB: LISTENER CONTROL                        -->
+    <!-- ============================================ -->
+    <div class="of-tab-pane" data-tab-pane="listener">
+      <div class="of-section-header">
+        <h2>Listener Control</h2>
       </div>
-    </div>
-  </div>
 
-  <div class="of-row">
-    <div>
-      <div class="of-label">Stop Listener</div>
-      <div class="of-help warn">
-        WARNING: This stops the plugin entirely. No requests/votes will be fetched and no playback state will be reported to ShowPilot.
+      <div class="of-row">
+        <div>
+          <div class="of-label">Restart Listener</div>
+          <div class="of-help">
+            Reloads the plugin config and restarts the polling loop.
+            Run this after changing config values via "Plugin Config" below.
+          </div>
+        </div>
+        <div class="of-control">
+          <div class="of-btn-group">
+            <button type="button" class="of-btn of-btn-primary" onclick="restartListener();">Restart Listener</button>
+            <span id="restartStatus" class="of-status muted"></span>
+          </div>
+        </div>
       </div>
-    </div>
-    <div class="of-control">
-      <div class="of-btn-group">
-        <button type="button" class="of-btn of-btn-danger" onclick="stopListener();">Stop Listener</button>
-        <span id="stopStatus" class="of-status muted"></span>
+
+      <div class="of-row">
+        <div>
+          <div class="of-label">Stop Listener</div>
+          <div class="of-help warn">
+            WARNING: This stops the plugin entirely. No requests/votes will be fetched and no playback state will be
+            reported to ShowPilot.
+          </div>
+        </div>
+        <div class="of-control">
+          <div class="of-btn-group">
+            <button type="button" class="of-btn of-btn-danger" onclick="stopListener();">Stop Listener</button>
+            <span id="stopStatus" class="of-status muted"></span>
+          </div>
+        </div>
       </div>
-    </div>
-  </div>
 
-  </div><!-- /tab: listener -->
+    </div><!-- /tab: listener -->
 
-  <!-- ============================================ -->
-  <!-- TAB: DIAGNOSTICS                             -->
-  <!-- ============================================ -->
-  <div class="of-tab-pane" data-tab-pane="diagnostics">
-  <div class="of-section-header">
-    <h2>Diagnostics</h2>
-  </div>
-
-  <div class="of-row">
-    <div>
-      <div class="of-label">Test Connectivity</div>
-      <div class="of-help">
-        Pings the ShowPilot server using the Show Token to verify it's reachable
-        and the token is correct.
+    <!-- ============================================ -->
+    <!-- TAB: DIAGNOSTICS                             -->
+    <!-- ============================================ -->
+    <div class="of-tab-pane" data-tab-pane="diagnostics">
+      <div class="of-section-header">
+        <h2>Diagnostics</h2>
       </div>
-    </div>
-    <div class="of-control">
-      <div class="of-btn-group">
-        <button type="button" class="of-btn of-btn-primary" onclick="testConnectivity();">Test Connectivity</button>
-        <span id="connectivityStatus" class="of-status muted"></span>
+
+      <div class="of-row">
+        <div>
+          <div class="of-label">Test Connectivity</div>
+          <div class="of-help">
+            Pings the ShowPilot server using the Show Token to verify it's reachable
+            and the token is correct.
+          </div>
+        </div>
+        <div class="of-control">
+          <div class="of-btn-group">
+            <button type="button" class="of-btn of-btn-primary" onclick="testConnectivity();">Test Connectivity</button>
+            <span id="connectivityStatus" class="of-status muted"></span>
+          </div>
+        </div>
       </div>
-    </div>
-  </div>
 
-  <div class="of-row">
-    <div>
-      <div class="of-label">Listener Log (tail)</div>
-      <div class="of-help">
-        Latest lines from <code>/home/fpp/media/logs/showpilot-listener.log</code>.
-        Auto-refreshes every 5 seconds while shown.
+      <div class="of-row">
+        <div>
+          <div class="of-label">Listener Log (tail)</div>
+          <div class="of-help">
+            Latest lines from <code>/home/fpp/media/logs/showpilot-listener.log</code>.
+            Auto-refreshes every 5 seconds while shown.
+          </div>
+        </div>
+        <div class="of-control">
+          <div class="of-btn-group">
+            <button type="button" class="of-btn of-btn-neutral" onclick="tailLog();">Tail Log (50 lines)</button>
+            <button type="button" class="of-btn of-btn-neutral" onclick="toggleAutoTail();"
+              id="autoTailBtn">Auto-Refresh: Off</button>
+          </div>
+          <pre id="logOutput" class="of-log-output"></pre>
+        </div>
       </div>
-    </div>
-    <div class="of-control">
-      <div class="of-btn-group">
-        <button type="button" class="of-btn of-btn-neutral" onclick="tailLog();">Tail Log (50 lines)</button>
-        <button type="button" class="of-btn of-btn-neutral" onclick="toggleAutoTail();" id="autoTailBtn">Auto-Refresh: Off</button>
+
+    </div><!-- /tab: diagnostics -->
+
+    <!-- ============================================ -->
+    <!-- TAB: ADVANCED / DEVELOPER                    -->
+    <!-- ============================================ -->
+    <div class="of-tab-pane" data-tab-pane="developer">
+      <div class="of-section-header">
+        <h2>Developer Settings</h2>
+        <span class="of-section-sub">Probably best to leave these alone…</span>
       </div>
-      <pre id="logOutput" class="of-log-output"></pre>
-    </div>
-  </div>
 
-  </div><!-- /tab: diagnostics -->
-
-  <!-- ============================================ -->
-  <!-- TAB: ADVANCED / DEVELOPER                    -->
-  <!-- ============================================ -->
-  <div class="of-tab-pane" data-tab-pane="developer">
-  <div class="of-section-header">
-    <h2>Developer Settings</h2>
-    <span class="of-section-sub">Probably best to leave these alone…</span>
-  </div>
-
-  <div class="of-row">
-    <div>
-      <div class="of-label">Verbose Logging</div>
-      <div class="of-help">
-        Logs every API call. Useful for debugging.
-        <span style="color: var(--of-accent); font-weight: 600;">Will produce a lot of log output.</span>
+      <div class="of-row">
+        <div>
+          <div class="of-label">Verbose Logging</div>
+          <div class="of-help">
+            Logs every API call. Useful for debugging.
+            <span style="color: var(--of-accent); font-weight: 600;">Will produce a lot of log output.</span>
+          </div>
+        </div>
+        <div class="of-control">
+          <label class="of-toggle">
+            <input type="checkbox" id="verboseLogging" <?php echo (val($pluginSettings, 'verboseLogging' )==='true' )
+              ? 'checked' : '' ; ?>
+            onchange="SetPluginSetting('
+            <?php echo $pluginName; ?>','verboseLogging',encodeURIComponent(this.checked ? 'true' : 'false'));" />
+            <span class="of-toggle-slider"></span>
+          </label>
+        </div>
       </div>
-    </div>
-    <div class="of-control">
-      <label class="of-toggle">
-        <input type="checkbox" id="verboseLogging"
-               <?php echo (val($pluginSettings, 'verboseLogging') === 'true') ? 'checked' : ''; ?>
-               onchange="SetPluginSetting('<?php echo $pluginName; ?>','verboseLogging',encodeURIComponent(this.checked ? 'true' : 'false'));" />
-        <span class="of-toggle-slider"></span>
-      </label>
-    </div>
-  </div>
 
-  <div class="of-row">
-    <div>
-      <div class="of-label">Plugin Config (raw)</div>
-      <div class="of-help warn">
-        WARNING: Editing these values directly can break the plugin.
-        Click <em>Load Config</em> to view, edit, and <em>Save Config</em> to persist.
-        After saving, click <em>Restart Listener</em>.
+      <div class="of-row">
+        <div>
+          <div class="of-label">Plugin Config (raw)</div>
+          <div class="of-help warn">
+            WARNING: Editing these values directly can break the plugin.
+            Click <em>Load Config</em> to view, edit, and <em>Save Config</em> to persist.
+            After saving, click <em>Restart Listener</em>.
+          </div>
+        </div>
+        <div class="of-control">
+          <textarea id="rawConfig" class="of-textarea"
+            placeholder="Click 'Load Config' to view current config…"></textarea>
+          <div class="of-btn-group">
+            <button type="button" class="of-btn of-btn-neutral" onclick="loadRawConfig();">Load Config</button>
+            <button type="button" class="of-btn of-btn-success" onclick="saveRawConfig();">Save Config</button>
+            <span id="rawConfigStatus" class="of-status muted"></span>
+          </div>
+        </div>
       </div>
-    </div>
-    <div class="of-control">
-      <textarea id="rawConfig" class="of-textarea" placeholder="Click 'Load Config' to view current config…"></textarea>
-      <div class="of-btn-group">
-        <button type="button" class="of-btn of-btn-neutral" onclick="loadRawConfig();">Load Config</button>
-        <button type="button" class="of-btn of-btn-success" onclick="saveRawConfig();">Save Config</button>
-        <span id="rawConfigStatus" class="of-status muted"></span>
-      </div>
-    </div>
-  </div>
 
-  </div><!-- /tab: developer -->
+    </div><!-- /tab: developer -->
 
-  <!-- Footer with project links — kept inside .of-card so the card's
+    <!-- Footer with project links — kept inside .of-card so the card's
        background extends down to enclose them. Otherwise the link line
        floats in the bare FPP page background, looking unfinished. -->
-  <div class="of-page-footer">
-    ShowPilot &middot; <a href="https://github.com/ShowPilotFPP/ShowPilot" target="_blank" rel="noopener">Server</a> &middot;
-    <a href="https://github.com/ShowPilotFPP/ShowPilot-plugin" target="_blank" rel="noopener">Plugin source</a>
-  </div>
+    <div class="of-page-footer">
+      ShowPilot &middot; <a href="https://github.com/ShowPilotFPP/ShowPilot" target="_blank" rel="noopener">Server</a>
+      &middot;
+      <a href="https://github.com/ShowPilotFPP/ShowPilot-plugin" target="_blank" rel="noopener">Plugin source</a>
+    </div>
 
   </div><!-- /of-card -->
 </div>
@@ -705,16 +1004,32 @@ if (!empty(trim((string)$ps))) {
     const page = document.querySelector('.of-page');
     if (!page) return;
     const isLight = page.classList.contains('theme-light')
-                 || page.classList.contains('theme-auto-light');
+      || page.classList.contains('theme-auto-light');
     document.body.style.background = isLight ? '#f5f7fb' : '#0a1428';
   }
   paintBodyBackground();
   // Wrap applyOfTheme so any theme change triggers a repaint
   const _origApplyOfTheme = applyOfTheme;
-  applyOfTheme = function(theme) {
+  applyOfTheme = function (theme) {
     _origApplyOfTheme(theme);
     paintBodyBackground();
   };
+
+  // ============================================================
+  // ShowPilot proxy helper
+  //
+  // ALL ShowPilot API calls go through this function. It routes
+  // through showpilot_proxy.php on FPP (same origin) so the browser
+  // never makes a cross-origin request to the ShowPilot server.
+  // This prevents ad blockers and browser extensions from interfering.
+  // Auth is handled server-side — the show token never needs to appear
+  // in JS for any of these calls.
+  // ============================================================
+  function showpilotFetch(path, options = {}) {
+    const proxyUrl = '/plugin.php?_menu=content&plugin=showpilot&page=showpilot_proxy.php&nopage=1'
+      + '&path=' + encodeURIComponent(path);
+    return fetch(proxyUrl, options);
+  }
 
   // ============================================================
   // FPP setting save (REST API)
@@ -741,7 +1056,7 @@ if (!empty(trim((string)$ps))) {
   }
 
   // ============================================================
-  // Sync Playlist (reads FPP playlist JSON, posts to ShowPilot)
+  // Sync Playlist (reads FPP playlist JSON, posts to ShowPilot via proxy)
   // ============================================================
   function prettifyName(name) {
     return (name || '').replace(/[_\-]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -764,14 +1079,8 @@ if (!empty(trim((string)$ps))) {
   }
 
   async function syncPlaylist() {
-    const serverUrl = document.getElementById('serverUrl').value.trim().replace(/\/$/, '');
-    const showToken = document.getElementById('showToken').value.trim();
     const playlist = document.getElementById('remotePlaylist').value;
 
-    if (!serverUrl || !showToken) {
-      setStatus('syncStatus', 'Set Server URL and Show Token first', 'error');
-      return;
-    }
     if (!playlist) {
       setStatus('syncStatus', 'Select a Remote Playlist first', 'error');
       return;
@@ -797,7 +1106,7 @@ if (!empty(trim((string)$ps))) {
 
       // Track items so we can fetch tags after the basic loop
       const itemsForTags = [];
-      items.forEach(function(item) {
+      items.forEach(function (item) {
         let fileName = '';
         let mediaName = '';
         if (item.type === 'both') {
@@ -863,12 +1172,11 @@ if (!empty(trim((string)$ps))) {
 
       setStatus('syncStatus', 'Pushing ' + sequences.length + ' sequences to ShowPilot…', 'muted');
 
-      const syncRes = await fetch(serverUrl + '/api/plugin/sync-sequences', {
+      // Route through the FPP-side proxy — same-origin, ad-blocker safe.
+      // The proxy reads serverUrl + showToken from the plugin config file.
+      const syncRes = await showpilotFetch('/api/plugin/sync-sequences', {
         method: 'POST',
-        headers: {
-          'Authorization': 'Bearer ' + showToken,
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playlistName: playlist, sequences: sequences }),
       });
 
@@ -881,16 +1189,14 @@ if (!empty(trim((string)$ps))) {
 
       const data = await syncRes.json();
 
-      // ---- Audio cache sync (v0.9.0-beta+) ----
-      // Bundled with the existing metadata sync. If the user has unchecked
-      // the audio-sync checkbox, skip — they're opting out (probably because
-      // their LAN to ShowPilot is slow, or they're testing). Default is on.
+      // ---- Audio cache sync ----
+      // If the user has unchecked the audio-sync checkbox, skip.
       const audioSync = document.getElementById('syncAudioCheckbox');
       const shouldSyncAudio = !audioSync || audioSync.checked;
       let audioSyncSummary = '';
       if (shouldSyncAudio) {
         try {
-          audioSyncSummary = await syncAudioCache(serverUrl, showToken, sequences);
+          audioSyncSummary = await syncAudioCache(sequences);
         } catch (e) {
           // Audio sync failure shouldn't fail the whole sync — metadata is
           // already pushed, viewers still work via the FPP-proxy fallback
@@ -958,30 +1264,23 @@ if (!empty(trim((string)$ps))) {
     ];
     function rotr(n, x) { return ((x >>> n) | (x << (32 - n))) >>> 0; }
 
-    // Pad message to 512-bit (64-byte) blocks. Length in bits as 64-bit
-    // big-endian at the end; SHA-256 spec requires this exact format.
     const bitLen = bytes.length * 8;
-    const padLen = ((bytes.length + 9 + 63) >> 6) << 6; // round up to multiple of 64
+    const padLen = ((bytes.length + 9 + 63) >> 6) << 6;
     const padded = new Uint8Array(padLen);
     padded.set(bytes);
     padded[bytes.length] = 0x80;
-    // Length is 64-bit big-endian; we only fill the low 32 bits because
-    // browser ArrayBuffers can't exceed ~2GB anyway.
     const view = new DataView(padded.buffer);
     view.setUint32(padLen - 4, bitLen >>> 0, false);
     view.setUint32(padLen - 8, Math.floor(bitLen / 0x100000000), false);
 
     const W = new Uint32Array(64);
     for (let i = 0; i < padLen; i += 64) {
-      for (let t = 0; t < 16; t++) {
-        W[t] = view.getUint32(i + t * 4, false);
-      }
+      for (let t = 0; t < 16; t++) W[t] = view.getUint32(i + t * 4, false);
       for (let t = 16; t < 64; t++) {
         const s0 = rotr(7, W[t - 15]) ^ rotr(18, W[t - 15]) ^ (W[t - 15] >>> 3);
         const s1 = rotr(17, W[t - 2]) ^ rotr(19, W[t - 2]) ^ (W[t - 2] >>> 10);
         W[t] = (W[t - 16] + s0 + W[t - 7] + s1) >>> 0;
       }
-
       let [a, b, c, d, e, f, g, h] = H;
       for (let t = 0; t < 64; t++) {
         const S1 = rotr(6, e) ^ rotr(11, e) ^ rotr(25, e);
@@ -990,57 +1289,33 @@ if (!empty(trim((string)$ps))) {
         const S0 = rotr(2, a) ^ rotr(13, a) ^ rotr(22, a);
         const maj = (a & b) ^ (a & c) ^ (b & c);
         const temp2 = (S0 + maj) >>> 0;
-        h = g; g = f; f = e;
-        e = (d + temp1) >>> 0;
-        d = c; c = b; b = a;
-        a = (temp1 + temp2) >>> 0;
+        h = g; g = f; f = e; e = (d + temp1) >>> 0;
+        d = c; c = b; b = a; a = (temp1 + temp2) >>> 0;
       }
-      H[0] = (H[0] + a) >>> 0;
-      H[1] = (H[1] + b) >>> 0;
-      H[2] = (H[2] + c) >>> 0;
-      H[3] = (H[3] + d) >>> 0;
-      H[4] = (H[4] + e) >>> 0;
-      H[5] = (H[5] + f) >>> 0;
-      H[6] = (H[6] + g) >>> 0;
-      H[7] = (H[7] + h) >>> 0;
+      H[0] = (H[0] + a) >>> 0; H[1] = (H[1] + b) >>> 0; H[2] = (H[2] + c) >>> 0; H[3] = (H[3] + d) >>> 0;
+      H[4] = (H[4] + e) >>> 0; H[5] = (H[5] + f) >>> 0; H[6] = (H[6] + g) >>> 0; H[7] = (H[7] + h) >>> 0;
     }
-
     return H.map(x => x.toString(16).padStart(8, '0')).join('');
   }
 
   // ============================================================
   // syncAudioCache — uploads audio files to ShowPilot so it can serve
-  //                  them locally instead of proxying through FPP
-  // ============================================================
-  // For each sequence with a mediaName:
-  //   1. Read the file from FPP via /api/file/Music/<mediaName>
-  //   2. Compute SHA-256 of the bytes
-  //   3. Compare against ShowPilot's manifest (one fetch up front)
-  //   4. Upload missing files; link existing-but-renamed files
+  //                  them locally instead of proxying through FPP.
   //
-  // Returns a status suffix string (e.g. " · uploaded 23/60 files") to
-  // append to the main sync success message. Throws if the manifest
-  // fetch fails (network error, server unreachable) — but per-file
-  // failures are caught and tallied so one bad file doesn't abort.
-  //
-  // Missing-on-FPP files are listed in a follow-up status update so the
-  // user knows about them but the sync still succeeds for everything
-  // that worked.
+  // All three ShowPilot API calls (manifest, link, upload) go through
+  // showpilotFetch so they are same-origin and ad-blocker safe.
+  // The proxy handles auth and — for the upload path — forwards the
+  // Content-Type and query params (hash, mediaName) to ShowPilot.
   // ============================================================
-  async function syncAudioCache(serverUrl, showToken, sequences) {
-    // Filter to sequences that actually have audio. Nothing to upload
-    // for sequence-only items (no media file).
+  async function syncAudioCache(sequences) {
     const withAudio = sequences.filter(s => s.mediaName);
-    if (withAudio.length === 0) {
-      return ' · no audio files to sync';
-    }
+    if (withAudio.length === 0) return ' · no audio files to sync';
 
     setStatus('syncStatus', 'Checking audio cache…', 'muted');
 
-    // Step 1: fetch manifest of what ShowPilot already has
-    const manifestRes = await fetch(serverUrl + '/api/plugin/audio-cache/manifest', {
-      headers: { 'Authorization': 'Bearer ' + showToken },
-    });
+    // Step 1: fetch manifest of hashes ShowPilot already has.
+    // Routed through proxy — same-origin, ad-blocker safe.
+    const manifestRes = await showpilotFetch('/api/plugin/audio-cache/manifest');
     if (!manifestRes.ok) {
       throw new Error('manifest fetch failed (' + manifestRes.status + ')');
     }
@@ -1061,13 +1336,9 @@ if (!empty(trim((string)$ps))) {
     if (manifestData.audioEnabled === false) {
       return ' · audio disabled on server (skipped)';
     }
-
+    
     const haveHashes = new Set(manifestData.haveHashes || []);
 
-    // Step 2: for each audio file, hash it and decide upload vs link vs skip.
-    // We do this serially rather than in parallel because the FPP web server
-    // on a Pi can choke on 30+ concurrent file reads. Sequential is slower
-    // wall-clock but actually completes; parallel might OOM the Pi.
     let uploaded = 0;
     let linked = 0;
     let alreadyCached = 0;
@@ -1076,48 +1347,31 @@ if (!empty(trim((string)$ps))) {
 
     for (let i = 0; i < withAudio.length; i++) {
       const seq = withAudio[i];
-
-      // Decide if this is a video file we need to extract audio from,
-      // or a regular audio file we can upload as-is. Detection is by
-      // extension because that's what FPP exposes via mediaName.
       const ext = (seq.mediaName.match(/\.([^.]+)$/) || [, ''])[1].toLowerCase();
       const isVideo = ['mp4', 'm4v', 'mov', 'mkv', 'avi', 'webm', 'wmv', 'flv'].indexOf(ext) !== -1;
 
       setStatus('syncStatus',
         'Audio sync ' + (i + 1) + '/' + withAudio.length + ': '
-          + (isVideo ? 'extracting audio from ' : '') + seq.mediaName,
+        + (isVideo ? 'extracting audio from ' : '') + seq.mediaName,
         'muted');
 
-      // For audio files: read directly from FPP's file endpoint.
-      // For video files: hit our extract_audio.php which streams the
-      //   audio track demuxed (no re-encode) as M4A. ShowPilot stores
-      //   the M4A bytes; viewer's Web Audio decodes AAC natively.
-      // Both paths produce `fileBuffer` (ArrayBuffer) and `uploadMime`.
       let fileBuffer;
       let uploadMime;
+
       if (isVideo) {
-        // extract_audio.php returns audio/mp4 (M4A). Same-origin call to
-        // FPP's plugin loader; no auth needed.
         try {
           const extractUrl = '/plugin.php?_menu=content&plugin=showpilot'
             + '&page=extract_audio.php&nopage=1'
             + '&file=' + encodeURIComponent(seq.mediaName);
           const extRes = await fetch(extractUrl);
-          if (extRes.status === 404) {
-            missingFromFpp.push(seq.mediaName);
-            continue;
-          }
+          if (extRes.status === 404) { missingFromFpp.push(seq.mediaName); continue; }
           if (!extRes.ok) {
             const body = await extRes.text();
-            failed.push(seq.mediaName + ' (extract ' + extRes.status + ': '
-              + body.slice(0, 80) + ')');
+            failed.push(seq.mediaName + ' (extract ' + extRes.status + ': ' + body.slice(0, 80) + ')');
             continue;
           }
           fileBuffer = await extRes.arrayBuffer();
           if (fileBuffer.byteLength === 0) {
-            // Extraction "succeeded" with empty body — usually means
-            // ffmpeg crashed mid-stream after sending headers. Treat
-            // as failure rather than uploading 0 bytes.
             failed.push(seq.mediaName + ' (extract returned no data)');
             continue;
           }
@@ -1127,13 +1381,9 @@ if (!empty(trim((string)$ps))) {
           continue;
         }
       } else {
-        // Regular audio file. Read raw bytes from FPP.
         try {
           const fileRes = await fetch('/api/file/Music/' + encodeURIComponent(seq.mediaName));
-          if (fileRes.status === 404) {
-            missingFromFpp.push(seq.mediaName);
-            continue;
-          }
+          if (fileRes.status === 404) { missingFromFpp.push(seq.mediaName); continue; }
           if (!fileRes.ok) {
             failed.push(seq.mediaName + ' (FPP returned ' + fileRes.status + ')');
             continue;
@@ -1143,76 +1393,47 @@ if (!empty(trim((string)$ps))) {
           failed.push(seq.mediaName + ' (' + e.message + ')');
           continue;
         }
-        // Pick a sensible MIME from extension. The viewer-side decoder
-        // doesn't actually care (Web Audio sniffs the bytes), but
-        // ShowPilot stores this for completeness.
         const mimeMap = {
-          mp3: 'audio/mpeg',
-          m4a: 'audio/mp4',
-          aac: 'audio/aac',
-          ogg: 'audio/ogg',
-          wav: 'audio/wav',
-          flac: 'audio/flac',
+          mp3: 'audio/mpeg', m4a: 'audio/mp4', aac: 'audio/aac',
+          ogg: 'audio/ogg', wav: 'audio/wav', flac: 'audio/flac'
         };
         uploadMime = mimeMap[ext] || 'audio/mpeg';
       }
 
-      // Compute SHA-256. Web crypto's `crypto.subtle.digest` is the fast
-      // native path, but it's only available in "secure contexts" — HTTPS,
-      // localhost, or file://. The plugin UI runs from FPP's HTTP server
-      // on a LAN IP, which is NOT a secure context, so crypto.subtle is
-      // undefined there. Fall back to our pure-JS implementation in that
-      // case. Native is ~50x faster but JS works everywhere.
       const hashHex = await sha256Hex(fileBuffer);
 
-      // Decide: do we need to upload, just link, or skip entirely?
       if (haveHashes.has(hashHex)) {
-        // ShowPilot has the bytes already. Link the mediaName to the hash
-        // so the lookup table is current — this handles the case where a
-        // file was previously uploaded under a different mediaName, or
-        // the same file is referenced by a renamed sequence.
+        // ShowPilot already has these bytes — just update the name mapping.
+        // Routed through proxy — same-origin, ad-blocker safe.
         try {
-          const linkRes = await fetch(serverUrl + '/api/plugin/audio-cache/link', {
+          const linkRes = await showpilotFetch('/api/plugin/audio-cache/link', {
             method: 'POST',
-            headers: {
-              'Authorization': 'Bearer ' + showToken,
-              'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ mediaName: seq.mediaName, hash: hashHex }),
           });
-          if (linkRes.ok) {
-            linked++;
-          } else {
-            alreadyCached++;
-          }
+          if (linkRes.ok) { linked++; } else { alreadyCached++; }
         } catch (e) {
-          // Linking failure is non-fatal — server still has the bytes
-          // under the old mediaName; viewer might or might not find it.
           alreadyCached++;
         }
         continue;
       }
 
-      // Upload the bytes. Body is the raw file; hash + mediaName go in
-      // query string. Server verifies hash matches the bytes on the way in.
+      // Upload new bytes. Query params (hash + mediaName) are appended to
+      // the path and forwarded by the proxy to ShowPilot. The proxy also
+      // forwards the Content-Type so ShowPilot knows the audio format.
       try {
-        const uploadRes = await fetch(
-          serverUrl + '/api/plugin/audio-cache/upload'
-            + '?hash=' + encodeURIComponent(hashHex)
-            + '&mediaName=' + encodeURIComponent(seq.mediaName),
+        const uploadRes = await showpilotFetch(
+          '/api/plugin/audio-cache/upload'
+          + '?hash=' + encodeURIComponent(hashHex)
+          + '&mediaName=' + encodeURIComponent(seq.mediaName),
           {
             method: 'POST',
-            headers: {
-              'Authorization': 'Bearer ' + showToken,
-              'Content-Type': uploadMime,
-            },
+            headers: { 'Content-Type': uploadMime },
             body: fileBuffer,
           }
         );
         if (uploadRes.ok) {
           uploaded++;
-          // Add to local set so subsequent iterations of the same hash
-          // (e.g. duplicate audio across sequences) don't re-upload
           haveHashes.add(hashHex);
         } else {
           const errBody = await uploadRes.text();
@@ -1223,70 +1444,48 @@ if (!empty(trim((string)$ps))) {
       }
     }
 
-    // If any files were missing or failed, surface them so the user knows.
-    // Wait a tick so the success message above gets seen first (otherwise
-    // the warning replaces it before the user has a chance to read it).
+    // Surface any missing/failed files after the success line.
     if (missingFromFpp.length > 0 || failed.length > 0) {
       const lines = [];
       if (missingFromFpp.length > 0) {
         lines.push('⚠ ' + missingFromFpp.length + ' audio file' +
           (missingFromFpp.length === 1 ? '' : 's') + ' missing from FPP:');
         missingFromFpp.slice(0, 10).forEach(name => lines.push('  · ' + name));
-        if (missingFromFpp.length > 10) {
-          lines.push('  · …and ' + (missingFromFpp.length - 10) + ' more');
-        }
+        if (missingFromFpp.length > 10) lines.push('  · …and ' + (missingFromFpp.length - 10) + ' more');
       }
       if (failed.length > 0) {
-        lines.push('⚠ ' + failed.length + ' upload failure' +
-          (failed.length === 1 ? '' : 's') + ':');
+        lines.push('⚠ ' + failed.length + ' upload failure' + (failed.length === 1 ? '' : 's') + ':');
         failed.slice(0, 5).forEach(name => lines.push('  · ' + name));
-        if (failed.length > 5) {
-          lines.push('  · …and ' + (failed.length - 5) + ' more');
-        }
+        if (failed.length > 5) lines.push('  · …and ' + (failed.length - 5) + ' more');
       }
-      // Log full list to console for debugging; UI shows summary.
       console.warn('Audio sync issues:\n' + lines.join('\n'));
-      // Schedule the warning to appear after the success message so users
-      // see both. setTimeout decouples this from the immediate response.
       setTimeout(() => {
         const warningEl = document.getElementById('syncStatus');
         if (warningEl) {
-          // Append warning to existing success status with line break
           const current = warningEl.textContent;
-          warningEl.innerHTML = current + '<br><span style="color: var(--of-status-warning, #f59e0b); white-space: pre-line; display: block; margin-top: 0.4rem; font-size: 0.85em;">'
+          warningEl.innerHTML = current
+            + '<br><span style="color: var(--of-status-warning, #f59e0b); white-space: pre-line; display: block; margin-top: 0.4rem; font-size: 0.85em;">'
             + lines.join('\n').replace(/&/g, '&amp;').replace(/</g, '&lt;')
             + '</span>';
         }
       }, 200);
     }
 
-    // Build the summary suffix. Goes on the main success line.
     const parts = [];
     if (uploaded > 0) parts.push('uploaded ' + uploaded);
     if (linked > 0) parts.push('linked ' + linked);
     if (alreadyCached > 0) parts.push(alreadyCached + ' already cached');
-    if (parts.length === 0) {
-      return ' · audio: no changes';
-    }
-    return ' · audio: ' + parts.join(', ');
+    return parts.length === 0 ? ' · audio: no changes' : ' · audio: ' + parts.join(', ');
   }
 
   // ============================================================
-  // Connectivity test
+  // Connectivity test — routed through proxy, ad-blocker safe
   // ============================================================
   async function testConnectivity() {
-    const serverUrl = document.getElementById('serverUrl').value.trim().replace(/\/$/, '');
-    const showToken = document.getElementById('showToken').value.trim();
-    if (!serverUrl || !showToken) {
-      setStatus('connectivityStatus', 'Set Server URL and Show Token first', 'error');
-      return;
-    }
     setStatus('connectivityStatus', 'Pinging…', 'muted');
     const start = performance.now();
     try {
-      const res = await fetch(serverUrl + '/api/plugin/health', {
-        headers: { 'Authorization': 'Bearer ' + showToken },
-      });
+      const res = await showpilotFetch('/api/plugin/health');
       const ms = Math.round(performance.now() - start);
       if (res.ok) {
         setStatus('connectivityStatus', '✓ ShowPilot reachable (' + ms + ' ms)', 'success');
@@ -1321,7 +1520,7 @@ if (!empty(trim((string)$ps))) {
       pane.classList.toggle('active', pane.dataset.tabPane === name);
     });
     // Persist selection so refreshes return to same tab
-    try { localStorage.setItem('showpilot_plugin_tab', name); } catch {}
+    try { localStorage.setItem('showpilot_plugin_tab', name); } catch { }
   }
   // Restore last-selected tab on load
   (function restoreTab() {
@@ -1330,7 +1529,7 @@ if (!empty(trim((string)$ps))) {
       if (saved && document.querySelector(`.of-tab-pane[data-tab-pane="${saved}"]`)) {
         ofSwitchTab(saved);
       }
-    } catch {}
+    } catch { }
   })();
 
   // ============================================================

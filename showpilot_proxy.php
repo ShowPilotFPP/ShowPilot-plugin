@@ -39,6 +39,21 @@ $allowedPaths = [
 ];
 
 $path   = $_GET['path'] ?? '';
+$path = str_replace('\\', '/', $path);
+if ($path !== '' && $path[0] !== '/') {
+    $path = '/' . $path;
+}
+
+// The JS passes hash/mediaName as query params embedded in the path string
+// (e.g. /api/plugin/audio-cache/upload?hash=...&mediaName=...).
+// Strip the query portion before the allow-list check and parse it as a
+// fallback source for those params so the proxy picks them up correctly.
+$embeddedQuery = '';
+if (strpos($path, '?') !== false) {
+    [$path, $embeddedQuery] = explode('?', $path, 2);
+}
+parse_str($embeddedQuery, $embeddedParams);
+
 $method = $_SERVER['REQUEST_METHOD'];
 if (!in_array($path, $allowedPaths, true)) {
     http_response_code(403);
@@ -72,8 +87,12 @@ if ($body !== null) {
 $queryForward = '';
 if ($path === '/api/plugin/audio-cache/upload') {
     $params = [];
-    if (isset($_GET['hash']))      $params[] = 'hash='      . rawurlencode($_GET['hash']);
-    if (isset($_GET['mediaName'])) $params[] = 'mediaName=' . rawurlencode($_GET['mediaName']);
+    // Accept hash/mediaName from either their own $_GET keys (future-proof)
+    // or from the query string that was embedded in the path param (current JS behaviour).
+    $hash      = $_GET['hash']      ?? $embeddedParams['hash']      ?? '';
+    $mediaName = $_GET['mediaName'] ?? $embeddedParams['mediaName'] ?? '';
+    if ($hash)      $params[] = 'hash='      . rawurlencode($hash);
+    if ($mediaName) $params[] = 'mediaName=' . rawurlencode($mediaName);
     if ($params) $queryForward = '?' . implode('&', $params);
 }
 

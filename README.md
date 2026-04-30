@@ -88,13 +88,18 @@ A typical setup: schedule "Turn Viewer Control On" 30 minutes before showtime, "
 
 The listener is a long-running PHP process (started by FPP's plugin system at boot via `scripts/postStart.sh`). It polls every second and is gentle on FPP's CPU.
 
+All browser-to-ShowPilot API calls (Sync, Test Connectivity, audio upload) are routed through `showpilot_proxy.php` on FPP rather than going directly to the ShowPilot server. This keeps all requests same-origin, preventing ad blockers and browser extensions from interfering.
+
 ## Troubleshooting
 
 **Plugin UI page won't save settings**
 FPP 9+ moved its plugin JS helpers. The plugin uses FPP's REST API directly to save settings. If your FPP is older than 5.0 this won't work — upgrade FPP.
 
-**CSP errors in browser console when clicking Sync**
-FPP's Apache has a strict Content-Security-Policy that blocks connections to non-whitelisted domains. Add your ShowPilot URL:
+**Sync or Test Connectivity fails / does nothing**
+Most likely a browser extension (ad blocker, privacy extension) blocking the request. All ShowPilot API calls are routed through `showpilot_proxy.php` on FPP itself and should be same-origin and extension-safe — but if you're still seeing issues, check your browser console for `ERR_BLOCKED_BY_CLIENT` errors. Temporarily disabling extensions or using an Incognito window (which disables extensions by default) will confirm if that's the cause.
+
+**CSP errors in browser console**
+The listener automatically registers your ShowPilot server URL with FPP's Apache Content Security Policy whitelist on startup. If you see CSP errors after a fresh install, restart the listener once (registration runs at listener startup). If errors persist on an older FPP version that lacks the registration script, add the URL manually:
 
 ```bash
 sudo /opt/fpp/scripts/ManageApacheContentPolicy.sh add connect-src http://192.168.1.230:3100
