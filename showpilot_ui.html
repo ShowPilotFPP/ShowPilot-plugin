@@ -1056,21 +1056,32 @@ if (!empty(trim((string)$ps))) {
   }
 
   async function fetchPluginConfigText() {
-    let res = await fetch('/api/configfile/plugin.showpilot', { cache: 'no-store' });
+    const cacheBust = '_showpilot_ts=' + Date.now();
+    let res = await fetch('/api/configfile/plugin.showpilot?' + cacheBust, { cache: 'no-store' });
     if (res.ok) return await res.text();
 
-    res = await fetch('/plugin.php?_menu=content&plugin=showpilot&page=showpilot_config.php&nopage=1&action=raw', { cache: 'no-store' });
+    res = await fetch('/plugin.php?_menu=content&plugin=showpilot&page=showpilot_config.php&nopage=1&action=raw&' + cacheBust, { cache: 'no-store' });
     if (res.ok) return await res.text();
 
     throw new Error('Unable to load plugin config');
   }
 
   async function savePluginConfigText(content) {
-    return await fetch('/api/configfile/plugin.showpilot', {
+    return await fetch('/api/configfile/plugin.showpilot?_showpilot_ts=' + Date.now(), {
       method: 'POST',
       headers: { 'Content-Type': 'text/html' },
       body: content,
     });
+  }
+
+  async function pluginSettingPersisted(key, value) {
+    try {
+      const savedConfig = await fetchPluginConfigText();
+      return parsePluginConfigValue(savedConfig, key) === encodePluginConfigValue(value);
+    } catch (err) {
+      console.warn('Could not verify plugin setting save:', err);
+      return false;
+    }
   }
 
   async function savePluginSettingViaConfigFile(key, value) {
@@ -1080,8 +1091,7 @@ if (!empty(trim((string)$ps))) {
       throw new Error('Config file save failed: HTTP ' + saveRes.status);
     }
 
-    const savedConfig = await fetchPluginConfigText();
-    if (parsePluginConfigValue(savedConfig, key) !== encodePluginConfigValue(value)) {
+    if (!(await pluginSettingPersisted(key, value))) {
       throw new Error('Config file save did not persist');
     }
   }
@@ -1094,9 +1104,9 @@ if (!empty(trim((string)$ps))) {
         headers: { 'Content-Type': 'text/plain' },
         body: rawValue,
       });
-      if (res.ok) return;
+      if (res.ok && await pluginSettingPersisted(key, rawValue)) return;
 
-      console.warn('FPP settings API save failed, falling back to configfile:', res.status, await res.text());
+      console.warn('FPP settings API did not persist, falling back to configfile:', res.status, await res.text());
       await savePluginSettingViaConfigFile(key, rawValue);
     } catch (err) {
       try {
