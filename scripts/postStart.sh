@@ -22,6 +22,7 @@
 
 PLUGIN_DIR="/home/fpp/media/plugins/showpilot"
 LOG_DIR="/home/fpp/media/logs"
+CONFIG_FILE="/home/fpp/media/config/plugin.showpilot"
 mkdir -p "$LOG_DIR"
 
 # 1. Self-heal permissions — make all command and script files executable.
@@ -32,6 +33,12 @@ chmod +x "$PLUGIN_DIR/scripts/"*.sh 2>/dev/null
 chmod +x "$PLUGIN_DIR/showpilot_listener.php" 2>/dev/null
 chmod +x "$PLUGIN_DIR/listener_status.php" 2>/dev/null
 chmod +x "$PLUGIN_DIR/extract_audio.php" 2>/dev/null
+
+# Keep the plugin config writable by FPP's web/API process across older
+# installs, restores, and listener-created first-run files.
+touch "$CONFIG_FILE" 2>/dev/null
+chown fpp:fpp "$CONFIG_FILE" 2>/dev/null
+chmod 666 "$CONFIG_FILE" 2>/dev/null
 
 # 2. Kill any existing listener. Idempotent — exit 0 if killed, 1 if none
 # found. Both fine here.

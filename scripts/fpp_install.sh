@@ -15,6 +15,7 @@
 . ${FPPDIR}/scripts/common
 
 PLUGIN_DIR="/home/fpp/media/plugins/showpilot"
+CONFIG_FILE="/home/fpp/media/config/plugin.showpilot"
 
 # Force-sync with origin/main, discarding any local changes.
 # (Plugin code lives entirely in the repo — there shouldn't be any
@@ -28,6 +29,12 @@ fi
 
 # Ensure correct ownership
 chown -R fpp:fpp "$PLUGIN_DIR" 2>/dev/null
+
+# Older FPP installs can leave plugin config owned by the listener user only.
+# The web UI/API must also be able to update it when settings are changed.
+touch "$CONFIG_FILE" 2>/dev/null
+chown fpp:fpp "$CONFIG_FILE" 2>/dev/null
+chmod 666 "$CONFIG_FILE" 2>/dev/null
 
 # Make all command scripts and lifecycle scripts executable so FPP can run them.
 # (git-tracked exec bit doesn't always survive every install path, so we do this

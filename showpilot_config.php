@@ -32,8 +32,8 @@ function respondJson($code, $payload) {
 function ensureConfigFile($path) {
     if (!file_exists($path)) {
         @touch($path);
-        @chmod($path, 0644);
     }
+    @chmod($path, 0666);
     return file_exists($path) && is_readable($path);
 }
 
@@ -58,7 +58,7 @@ function writePluginSetting($path, $key, $value) {
     }
 
     $ok = @file_put_contents($path, implode("\n", $lines) . "\n");
-    @chmod($path, 0644);
+    @chmod($path, 0666);
     return $ok !== false;
 }
 
@@ -91,7 +91,7 @@ if ($action === 'raw') {
         respondJson(400, array('error' => 'Empty config'));
     }
     $ok = @file_put_contents($pluginConfigFile, $content);
-    @chmod($pluginConfigFile, 0644);
+    @chmod($pluginConfigFile, 0666);
     if ($ok === false) {
         respondJson(500, array('error' => 'Could not write plugin config'));
     }

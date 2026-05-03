@@ -47,8 +47,8 @@ $pluginSettings = parse_ini_file($pluginConfigFile);
 // First-run: create the config file if it doesn't exist
 if (!file_exists($pluginConfigFile)) {
     @touch($pluginConfigFile);
-    @chmod($pluginConfigFile, 0644);
 }
+@chmod($pluginConfigFile, 0666);
 $pluginSettings = @parse_ini_file($pluginConfigFile);
 if ($pluginSettings === false) $pluginSettings = array();
 
