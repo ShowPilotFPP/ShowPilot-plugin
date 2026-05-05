@@ -100,14 +100,24 @@ function mimeForFile(filename) {
 // the same rate FPP is feeding them to its speakers, so all phones that
 // connect to the relay are in lockstep with the speakers.
 //
-// Chunk size and interval are tuned so we deliver ~64KB/s for a typical
-// 128kbps MP3 — small enough to not over-buffer phones, large enough
-// to avoid choppy delivery on slower LAN connections.
+// Key: chunks must arrive frequently enough that the browser never thinks
+// the stream has stalled. 128kbps MP3 = 16,000 bytes/sec. We send ~1KB
+// every 62ms — smooth and continuous, no 500ms gaps that trigger stall.
+// For 320kbps files we send ~2.5KB every 62ms.
 
-const CHUNK_BYTES    = 8192;   // 8KB per chunk
-const CHUNK_INTERVAL = 500;    // ms between chunks — 8KB every 500ms = ~128kbps
+const CHUNK_BYTES = 1024; // 1KB per chunk for smooth delivery
 
-function streamFileAtPace(filePath, startByte, res, onEnd) {
+function getBytesPerMs(fileSize, durationSec) {
+  if (!durationSec || durationSec <= 0) return 16; // fallback: 128kbps
+  // Add 10% headroom so we stay slightly ahead of playback
+  return (fileSize / durationSec / 1000) * 1.1;
+}
+
+function streamFileAtPace(filePath, startByte, fileSize, durationSec, res, onEnd) {
+  const bytesPerMs = getBytesPerMs(fileSize, durationSec);
+  const intervalMs = Math.max(20, Math.round(CHUNK_BYTES / bytesPerMs));
+  log(`pacing: ${CHUNK_BYTES} bytes every ${intervalMs}ms (${Math.round(bytesPerMs * 1000)} bytes/sec, duration ${durationSec}s)`);
+
   let offset = startByte;
   let fd;
 
@@ -146,7 +156,7 @@ function streamFileAtPace(filePath, startByte, res, onEnd) {
       const ok = res.write(buf.slice(0, bytesRead));
       if (!ok) {
         // Back-pressure — wait for drain before next chunk
-        res.once('drain', () => setTimeout(readChunk, CHUNK_INTERVAL));
+        res.once('drain', () => setTimeout(readChunk, intervalMs));
         return;
       }
     } catch (_) {
@@ -155,7 +165,7 @@ function streamFileAtPace(filePath, startByte, res, onEnd) {
       return;
     }
 
-    setTimeout(readChunk, CHUNK_INTERVAL);
+    setTimeout(readChunk, intervalMs);
   }
 
   function cleanup() {
@@ -262,7 +272,7 @@ const server = http.createServer((req, res) => {
 
     log(`streaming "${rawName}" from byte ${startByte} (${positionSec.toFixed(1)}s)`);
 
-    streamFileAtPace(filePath, startByte, res, () => {
+    streamFileAtPace(filePath, startByte, stat.size, fppStatus.durationSec || 0, res, () => {
       log(`stream ended for "${rawName}"`);
       try { res.end(); } catch (_) {}
     });
