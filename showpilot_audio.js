@@ -119,42 +119,46 @@ function startFifoListener() {
   } catch (_) {}
 
   let buf = '';
-  let reopenDelay = 1000;
+  let fd = -1;
 
   function openFifo() {
     try {
-      // Open RDWR so the FIFO stays open even when no writer (C++ plugin) is attached.
-      // O_RDONLY + O_NONBLOCK returns EOF immediately when no writer exists.
-      const fd = fs.openSync(FIFO_PATH, fs.constants.O_RDWR | fs.constants.O_NONBLOCK);
-      const stream = fs.createReadStream(null, { fd, flags: 'r' });
-      reopenDelay = 1000;
-
-      stream.on('data', (chunk) => {
-        lastFifoMsgAt = Date.now();
-        buf += chunk.toString();
-        const lines = buf.split('\n');
-        buf = lines.pop();
-        lines.forEach(handleFppEvent);
-      });
-
-      stream.on('end', () => {
-        // Writer (C++ plugin) closed — reopen quietly, no log spam
-        setTimeout(openFifo, 500);
-      });
-
-      stream.on('error', (err) => {
-        if (err.code !== 'EAGAIN') log(`[fifo] error: ${err.message}`);
-        setTimeout(openFifo, reopenDelay);
-      });
-
+      // O_RDWR keeps FIFO open even with no writer attached
+      fd = fs.openSync(FIFO_PATH, fs.constants.O_RDWR | fs.constants.O_NONBLOCK);
+      log(`[fifo] listening on ${FIFO_PATH}`);
+      readLoop();
     } catch (err) {
-      // FIFO not ready or C++ plugin not writing yet — back off quietly
-      reopenDelay = Math.min(reopenDelay * 2, 10000);
-      setTimeout(openFifo, reopenDelay);
+      log(`[fifo] open failed: ${err.message}`);
+      setTimeout(openFifo, 2000);
     }
   }
 
-  log(`[fifo] listening on ${FIFO_PATH}`);
+  const readBuf = Buffer.alloc(4096);
+
+  function readLoop() {
+    if (fd < 0) return;
+    try {
+      const n = fs.readSync(fd, readBuf, 0, readBuf.length, null);
+      if (n > 0) {
+        lastFifoMsgAt = Date.now();
+        buf += readBuf.slice(0, n).toString();
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        lines.forEach(handleFppEvent);
+      }
+    } catch (err) {
+      if (err.code !== 'EAGAIN' && err.code !== 'EWOULDBLOCK') {
+        log(`[fifo] read error: ${err.message}`);
+        try { fs.closeSync(fd); } catch (_) {}
+        fd = -1;
+        setTimeout(openFifo, 1000);
+        return;
+      }
+    }
+    // Poll every 20ms — fast enough for 500ms sync updates from FPP
+    setTimeout(readLoop, 20);
+  }
+
   openFifo();
 }
 
