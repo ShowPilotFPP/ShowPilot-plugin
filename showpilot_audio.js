@@ -145,15 +145,20 @@ function streamFile(filePath, startByte, fileSize, durationSec, res, onEnd) {
   let stopped = false;
   const buf = Buffer.alloc(CHUNK_BYTES);
 
-  // Pace at 102% of real-time bitrate. Slightly faster than actual playback
-  // so the browser stays in lockstep with FPP's speakers. Without this,
-  // the browser falls behind and FPP moves to the next song while the
-  // browser is still playing the tail of the previous one.
+  // Wall-clock pacing: track how many bytes should have been delivered by now
+  // based on actual elapsed time. Send whenever we're behind, wait whenever
+  // we're ahead. This gives exact real-time sync with FPP's playback regardless
+  // of chunk size, while allowing an initial burst to fill the browser buffer fast.
   const bytesPerMs = (durationSec > 0 && fileSize > 0)
-    ? Math.min(Math.max(fileSize / durationSec / 1000 * 1.02, 8), 80)
+    ? Math.min(Math.max(fileSize / durationSec / 1000, 8), 80)
     : 16;
-  const intervalMs = Math.round(CHUNK_BYTES / bytesPerMs);
-  log(`streaming: ${Math.round(bytesPerMs * 1000)} bytes/sec, chunk every ${intervalMs}ms`);
+  log(`streaming: ${Math.round(bytesPerMs * 1000)} bytes/sec real-time paced`);
+
+  const streamStartMs = Date.now();
+  const streamStartByte = startByte;
+  // Initial burst: deliver the first 3 seconds worth instantly so canplay fires fast
+  const BURST_BYTES = Math.round(bytesPerMs * 3000);
+  let totalSent = 0;
 
   function readChunk() {
     if (stopped) return;
@@ -169,16 +174,33 @@ function streamFile(filePath, startByte, fileSize, durationSec, res, onEnd) {
 
     if (bytesRead === 0) { cleanup(); return; }
     offset += bytesRead;
+    totalSent += bytesRead;
 
     try {
       const ok = res.write(buf.slice(0, bytesRead));
       if (!ok) {
-        res.once('drain', () => setTimeout(readChunk, intervalMs));
+        res.once('drain', scheduleNext);
         return;
       }
     } catch (_) { cleanup(); return; }
 
-    setTimeout(readChunk, intervalMs);
+    scheduleNext();
+  }
+
+  function scheduleNext() {
+    if (stopped) return;
+    // During burst phase: send immediately
+    if (totalSent < BURST_BYTES) {
+      setImmediate(readChunk);
+      return;
+    }
+    // After burst: pace to wall clock. Calculate when we SHOULD be at current position.
+    const elapsedMs = Date.now() - streamStartMs;
+    const shouldHaveSentBytes = bytesPerMs * elapsedMs + BURST_BYTES;
+    const aheadBytes = totalSent - shouldHaveSentBytes;
+    // If we're ahead of real-time, wait before sending next chunk
+    const waitMs = aheadBytes > 0 ? Math.round(aheadBytes / bytesPerMs) : 0;
+    setTimeout(readChunk, Math.min(waitMs, 500));
   }
 
   function cleanup() {
