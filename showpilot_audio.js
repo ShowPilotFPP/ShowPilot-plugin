@@ -146,8 +146,28 @@ function streamFileAtPace(filePath, startByte, fileSize, durationSec, res, onEnd
     return;
   }
 
-  const buf = Buffer.alloc(CHUNK_BYTES);
   let stopped = false;
+
+  // Send an initial burst of ~3 seconds worth of audio so the browser
+  // fires canplay quickly without waiting for paced chunks to trickle in.
+  // After the burst, drop to paced delivery to stay in sync.
+  const BURST_BYTES = Math.min(Math.round(bytesPerMs * 3000), 128 * 1024); // 3s worth, max 128KB
+  const burstBuf = Buffer.alloc(BURST_BYTES);
+  try {
+    const bytesRead = fs.readSync(fd, burstBuf, 0, BURST_BYTES, offset);
+    if (bytesRead > 0) {
+      res.write(burstBuf.slice(0, bytesRead));
+      offset += bytesRead;
+      log(`burst: sent ${bytesRead} bytes to fill browser buffer`);
+    }
+  } catch (err) {
+    log('ERROR in burst read:', err.message);
+    try { fs.closeSync(fd); } catch (_) {}
+    onEnd();
+    return;
+  }
+
+  const buf = Buffer.alloc(CHUNK_BYTES);
 
   function readChunk() {
     if (stopped) return;
@@ -162,7 +182,6 @@ function streamFileAtPace(filePath, startByte, fileSize, durationSec, res, onEnd
     }
 
     if (bytesRead === 0) {
-      // End of file
       cleanup();
       return;
     }
@@ -172,12 +191,10 @@ function streamFileAtPace(filePath, startByte, fileSize, durationSec, res, onEnd
     try {
       const ok = res.write(buf.slice(0, bytesRead));
       if (!ok) {
-        // Back-pressure — wait for drain before next chunk
         res.once('drain', () => setTimeout(readChunk, intervalMs));
         return;
       }
     } catch (_) {
-      // Client disconnected
       cleanup();
       return;
     }
@@ -191,10 +208,10 @@ function streamFileAtPace(filePath, startByte, fileSize, durationSec, res, onEnd
     onEnd();
   }
 
-  // Allow caller to stop the stream (e.g. song changed, client disconnected)
   res.once('close', () => { stopped = true; });
 
-  readChunk();
+  // Start paced delivery after a short delay to let the burst settle
+  setTimeout(readChunk, intervalMs);
 }
 
 // ---- HTTP server ----
