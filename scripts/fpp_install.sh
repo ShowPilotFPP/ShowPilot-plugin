@@ -42,6 +42,31 @@ chmod 666 "$CONFIG_FILE" 2>/dev/null
 chmod +x "$PLUGIN_DIR/commands/"*.php 2>/dev/null
 chmod +x "$PLUGIN_DIR/scripts/"*.sh 2>/dev/null
 
+# ---- Node.js 18 installation ----
+# Required for the ShowPilot audio daemon (showpilot_audio.js).
+# ShowPilot Lite also requires Node 18 on the Pi, so this is consistent.
+# If Node 18+ is already installed, this block is skipped entirely.
+NODE_OK=0
+if command -v node >/dev/null 2>&1; then
+    NODE_MAJOR=$(node --version 2>/dev/null | sed 's/v//' | cut -d. -f1)
+    if [ "${NODE_MAJOR:-0}" -ge 18 ]; then
+        NODE_OK=1
+        echo "Node.js $(node --version) already installed — skipping install"
+    fi
+fi
+
+if [ "$NODE_OK" = "0" ]; then
+    echo "Installing Node.js 18..."
+    curl -fsSL https://deb.nodesource.com/setup_18.x | bash - 2>&1
+    apt-get install -y nodejs 2>&1
+    if command -v node >/dev/null 2>&1; then
+        echo "Node.js $(node --version) installed successfully"
+    else
+        echo "WARN: Node.js installation failed — audio daemon will not start"
+        echo "WARN: Install manually: curl -fsSL https://deb.nodesource.com/setup_18.x | bash - && apt-get install -y nodejs"
+    fi
+fi
+
 # Surface FPP's "Restart Required" banner in the plugin manager UI.
 # After the user clicks Restart, fppd cycles, postStop kills the listener,
 # postStart spawns a fresh one with the new code.

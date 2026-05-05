@@ -55,4 +55,25 @@ sleep 1
 setsid /usr/bin/php "$PLUGIN_DIR/showpilot_listener.php" \
     </dev/null >/dev/null 2>&1 &
 
+# ---- Audio daemon ----
+# Start the ShowPilot audio daemon if Node 18+ is available.
+# The daemon serves the currently-playing audio file as a live paced stream
+# on port 8090. ShowPilot (on the LXC) opens one connection and fans it out
+# to all viewer phones for automatic sync.
+# Kill any stale daemon first (same defensive pattern as the PHP listener).
+pkill -f "node $PLUGIN_DIR/showpilot_audio.js" 2>/dev/null
+sleep 0.5
+
+if command -v node >/dev/null 2>&1; then
+    NODE_MAJOR=$(node --version 2>/dev/null | sed 's/v//' | cut -d. -f1)
+    if [ "${NODE_MAJOR:-0}" -ge 18 ]; then
+        PORT=8090 \
+        MEDIA_ROOT="/home/fpp/media/music" \
+        FPP_HOST="http://127.0.0.1" \
+        LOG_FILE="$LOG_DIR/showpilot-audio.log" \
+        setsid /usr/bin/node "$PLUGIN_DIR/showpilot_audio.js" \
+            </dev/null >>"$LOG_DIR/showpilot-audio.log" 2>&1 &
+    fi
+fi
+
 #postStart
