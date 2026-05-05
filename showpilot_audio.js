@@ -119,12 +119,15 @@ function startFifoListener() {
   } catch (_) {}
 
   let buf = '';
+  let reopenDelay = 1000;
 
   function openFifo() {
-    // Open in non-blocking mode first to avoid hanging if no writer
     try {
-      const fd = fs.openSync(FIFO_PATH, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+      // Open RDWR so the FIFO stays open even when no writer (C++ plugin) is attached.
+      // O_RDONLY + O_NONBLOCK returns EOF immediately when no writer exists.
+      const fd = fs.openSync(FIFO_PATH, fs.constants.O_RDWR | fs.constants.O_NONBLOCK);
       const stream = fs.createReadStream(null, { fd, flags: 'r' });
+      reopenDelay = 1000;
 
       stream.on('data', (chunk) => {
         lastFifoMsgAt = Date.now();
@@ -135,22 +138,23 @@ function startFifoListener() {
       });
 
       stream.on('end', () => {
-        log('[fifo] writer closed, reopening...');
-        setTimeout(openFifo, 100);
+        // Writer (C++ plugin) closed — reopen quietly, no log spam
+        setTimeout(openFifo, 500);
       });
 
       stream.on('error', (err) => {
         if (err.code !== 'EAGAIN') log(`[fifo] error: ${err.message}`);
-        setTimeout(openFifo, 1000);
+        setTimeout(openFifo, reopenDelay);
       });
 
-      log(`[fifo] listening on ${FIFO_PATH}`);
     } catch (err) {
-      log(`[fifo] open failed: ${err.message}, retrying...`);
-      setTimeout(openFifo, 2000);
+      // FIFO not ready or C++ plugin not writing yet — back off quietly
+      reopenDelay = Math.min(reopenDelay * 2, 10000);
+      setTimeout(openFifo, reopenDelay);
     }
   }
 
+  log(`[fifo] listening on ${FIFO_PATH}`);
   openFifo();
 }
 
