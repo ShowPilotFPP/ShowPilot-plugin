@@ -106,28 +106,53 @@ function mimeForFile(filename) {
 // every 62ms — smooth and continuous, no 500ms gaps that trigger stall.
 // For 320kbps files we send ~2.5KB every 62ms.
 
-const CHUNK_BYTES = 2048; // 2KB per chunk
+const CHUNK_BYTES = 65536; // 64KB chunks for fast delivery
 
-function getBytesPerMs(fileSize, durationSec) {
-  // Calculate exact bitrate from file size and duration.
-  // If duration unknown, assume 128kbps (16,000 bytes/sec).
-  if (!durationSec || durationSec <= 0 || fileSize <= 0) {
-    log(`WARN: unknown duration/size, defaulting to 128kbps pacing`);
-    return 16; // 128kbps = 16 bytes/ms
+function streamFile(filePath, startByte, res, onEnd) {
+  let fd;
+  try {
+    fd = fs.openSync(filePath, 'r');
+  } catch (err) {
+    log('ERROR opening file:', err.message);
+    onEnd();
+    return;
   }
-  const bytesPerMs = fileSize / durationSec / 1000;
-  log(`bitrate calc: ${fileSize} bytes / ${durationSec}s = ${Math.round(bytesPerMs * 1000)} bytes/sec = ${Math.round(bytesPerMs * 8)} kbps`);
-  // Sanity check — if calculated rate is unreasonably high or low, clamp it
-  // (prevents runaway streaming if FPP reports wrong duration)
-  if (bytesPerMs < 8) {
-    log(`WARN: calculated rate too low (${Math.round(bytesPerMs*1000)} B/s), clamping to 64kbps`);
-    return 8;
+
+  let offset = startByte;
+  let stopped = false;
+  const buf = Buffer.alloc(CHUNK_BYTES);
+
+  function readChunk() {
+    if (stopped) return;
+    let bytesRead;
+    try {
+      bytesRead = fs.readSync(fd, buf, 0, CHUNK_BYTES, offset);
+    } catch (err) {
+      if (!stopped) log('ERROR reading file:', err.message);
+      cleanup();
+      return;
+    }
+    if (bytesRead === 0) { cleanup(); return; }
+    offset += bytesRead;
+    try {
+      const ok = res.write(buf.slice(0, bytesRead));
+      if (!ok) {
+        res.once('drain', readChunk);
+        return;
+      }
+    } catch (_) { cleanup(); return; }
+    // Small yield to keep Node event loop responsive, but no artificial delay
+    setImmediate(readChunk);
   }
-  if (bytesPerMs > 80) {
-    log(`WARN: calculated rate too high (${Math.round(bytesPerMs*1000)} B/s), clamping to 640kbps`);
-    return 80;
+
+  function cleanup() {
+    stopped = true;
+    try { fs.closeSync(fd); } catch (_) {}
+    onEnd();
   }
-  return bytesPerMs;
+
+  res.once('close', () => { stopped = true; });
+  readChunk();
 }
 
 function streamFileAtPace(filePath, startByte, fileSize, durationSec, res, onEnd) {
@@ -280,13 +305,13 @@ const server = http.createServer((req, res) => {
       return;
     }
 
-    // Async IIFE — request handler is sync but we need await for meta fetch
+    // Async IIFE — request handler is sync but we need await for position calc
     (async () => {
       const positionSec = fppStatus.playing && fppStatus.filename === rawName
         ? fppStatus.positionSec
         : 0;
 
-      // Get duration from FPP live status first, then fall back to media metadata API
+      // Get duration for start byte calculation only
       let durationSec = fppStatus.durationSec || 0;
       if (!durationSec) {
         try {
@@ -299,7 +324,6 @@ const server = http.createServer((req, res) => {
           }
         } catch (_) {}
       }
-      log(`duration: ${durationSec}s for "${rawName}"`);
 
       const startByte = durationSec > 0
         ? Math.floor((positionSec / durationSec) * stat.size)
@@ -318,7 +342,7 @@ const server = http.createServer((req, res) => {
 
       log(`streaming "${rawName}" from byte ${startByte} (${positionSec.toFixed(1)}s)`);
 
-      streamFileAtPace(filePath, startByte, stat.size, durationSec, res, () => {
+      streamFile(filePath, startByte, res, () => {
         log(`stream ended for "${rawName}"`);
         try { res.end(); } catch (_) {}
       });
