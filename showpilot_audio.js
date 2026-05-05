@@ -82,6 +82,7 @@ async function pollFppStatus() {
     fppStatus = { playing, filename, positionSec };
     if (changed && filename) log(`now playing: "${filename}" at ${positionSec.toFixed(1)}s`);
     broadcastPosition();
+    broadcastSyncPointIfDue();
   } catch (_) {}
 }
 
@@ -108,6 +109,28 @@ function broadcastPosition() {
     filename: fppStatus.filename,
     positionSec: fppStatus.positionSec,
     serverTimestamp: Date.now(),
+  });
+  for (const ws of wsClients) {
+    try { ws.send(msg); } catch (_) { wsClients.delete(ws); }
+  }
+}
+
+// Broadcast a sync point every 2 seconds — a named checkpoint all viewers
+// can use to coordinate play start. All devices waiting for the next sync
+// point will receive the same positionSec and serverTimestamp, so they can
+// all seek to the same position and play at the same wall-clock moment.
+let lastSyncPointAt = 0;
+function broadcastSyncPointIfDue() {
+  if (wsClients.size === 0) return;
+  const now = Date.now();
+  if (now - lastSyncPointAt < 2000) return;
+  lastSyncPointAt = now;
+  const msg = JSON.stringify({
+    type: 'syncPoint',
+    playing: fppStatus.playing,
+    filename: fppStatus.filename,
+    positionSec: fppStatus.positionSec,
+    serverTimestamp: now,
   });
   for (const ws of wsClients) {
     try { ws.send(msg); } catch (_) { wsClients.delete(ws); }
