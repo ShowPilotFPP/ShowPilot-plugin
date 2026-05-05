@@ -189,18 +189,23 @@ function streamFile(filePath, startByte, fileSize, durationSec, res, onEnd) {
 
   function scheduleNext() {
     if (stopped) return;
-    // During burst phase: send immediately
-    if (totalSent < BURST_BYTES) {
-      setImmediate(readChunk);
-      return;
-    }
-    // After burst: pace to wall clock. Calculate when we SHOULD be at current position.
+    // Target: always stay exactly BURST_BYTES ahead of real-time wall clock.
+    // This gives 3s of pre-buffer for instant playback while pacing the
+    // stream to match FPP's actual playback speed.
+    //
+    // totalSent should equal: bytesPerMs * elapsedMs + BURST_BYTES
+    // If ahead: wait. If behind: send immediately.
     const elapsedMs = Date.now() - streamStartMs;
-    const shouldHaveSentBytes = bytesPerMs * elapsedMs + BURST_BYTES;
-    const aheadBytes = totalSent - shouldHaveSentBytes;
-    // If we're ahead of real-time, wait before sending next chunk
-    const waitMs = aheadBytes > 0 ? Math.round(aheadBytes / bytesPerMs) : 0;
-    setTimeout(readChunk, Math.min(waitMs, 500));
+    const targetSent = (bytesPerMs * elapsedMs) + BURST_BYTES;
+    const aheadBytes = totalSent - targetSent;
+    if (aheadBytes > 0) {
+      // We're ahead — wait until wall clock catches up
+      const waitMs = Math.min(Math.round(aheadBytes / bytesPerMs), 200);
+      setTimeout(readChunk, waitMs);
+    } else {
+      // Behind or on time — send immediately
+      setImmediate(readChunk);
+    }
   }
 
   function cleanup() {
