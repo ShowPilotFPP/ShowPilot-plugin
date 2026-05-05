@@ -55,6 +55,29 @@ function log(...args) {
 
 let fppStatus = { playing: false, filename: null, positionSec: 0, durationSec: 0 };
 
+// Duration cache — keyed by filename, populated from /api/media/<file>/meta
+// which uses ffprobe and is always accurate. Never trust fppd/status for duration.
+const durationCache = {};
+
+async function getDuration(filename) {
+  if (durationCache[filename]) return durationCache[filename];
+  try {
+    const res = await fetch(`${FPP_HOST}/api/media/${encodeURIComponent(filename)}/meta`, {
+      signal: AbortSignal.timeout(3000),
+    });
+    if (res.ok) {
+      const meta = await res.json();
+      const dur = parseFloat(meta.format?.duration || meta.duration || 0);
+      if (dur > 0) {
+        durationCache[filename] = dur;
+        log(`cached duration for "${filename}": ${dur}s`);
+        return dur;
+      }
+    }
+  } catch (_) {}
+  return 0;
+}
+
 async function pollFppStatus() {
   try {
     const res = await fetch(`${FPP_HOST}/api/fppd/status`, {
@@ -63,13 +86,13 @@ async function pollFppStatus() {
     if (!res.ok) return;
     const data = await res.json();
     const playing = data.status === 1 || data.status === 'playing';
+    const filename = data.current_song || null;
     fppStatus = {
       playing,
-      filename: data.current_song || null,
+      filename,
       positionSec: parseFloat(data.seconds_elapsed || 0),
-      durationSec: parseFloat(data.seconds_remaining
-        ? (data.seconds_elapsed || 0) + data.seconds_remaining
-        : (data.song_duration || 0)),
+      // Duration intentionally omitted from live status — use getDuration() instead
+      durationSec: 0,
     };
   } catch (_) {
     // FPP not reachable — keep last known state
@@ -300,7 +323,8 @@ const server = http.createServer((req, res) => {
   // ---- GET /status ----
   if (pathname === '/status') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(fppStatus));
+    const cachedDur = fppStatus.filename ? (durationCache[fppStatus.filename] || 0) : 0;
+    res.end(JSON.stringify({ ...fppStatus, durationSec: cachedDur }));
     return;
   }
 
@@ -339,19 +363,8 @@ const server = http.createServer((req, res) => {
         ? fppStatus.positionSec
         : 0;
 
-      // Get duration for start byte calculation only
-      let durationSec = fppStatus.durationSec || 0;
-      if (!durationSec) {
-        try {
-          const metaRes = await fetch(`${FPP_HOST}/api/media/${encodeURIComponent(rawName)}/meta`, {
-            signal: AbortSignal.timeout(2000),
-          });
-          if (metaRes.ok) {
-            const meta = await metaRes.json();
-            durationSec = parseFloat(meta.duration || meta.format?.duration || 0);
-          }
-        } catch (_) {}
-      }
+      // Get duration from cache or media meta API — never trust fppd/status
+      let durationSec = await getDuration(rawName);
 
       const startByte = durationSec > 0
         ? Math.floor((positionSec / durationSec) * stat.size)
