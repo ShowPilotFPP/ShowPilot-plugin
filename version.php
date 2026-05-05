@@ -13,4 +13,4 @@
 // "0.10.0" in other files and update by hand — by design, no other file
 // has it.
 // ============================================================
-$PLUGIN_VERSION = "0.13.22";
+$PLUGIN_VERSION = "0.13.23";

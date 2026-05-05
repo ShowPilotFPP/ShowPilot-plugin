@@ -44,10 +44,20 @@ function log(...args) {
   }
 }
 
-// ---- FPP status polling ----
+// ---- FPP status via FIFO (primary) + HTTP polling (fallback) ----
+//
+// The ShowPilot C++ FPP plugin hooks into FPP's MultiSync system and writes
+// sync events to a named FIFO at /tmp/SHOWPILOT_FIFO. This gives us
+// precise position data from FPP's internal clock, called directly by fppd.
+//
+// Falls back to HTTP polling /api/fppd/status if C++ plugin not installed.
+
+const FIFO_PATH = '/tmp/SHOWPILOT_FIFO';
+const { execSync } = require('child_process');
 
 let fppStatus = { playing: false, filename: null, positionSec: 0 };
 const durationCache = {};
+let lastFifoMsgAt = 0;
 
 async function getDuration(filename) {
   if (durationCache[filename]) return durationCache[filename];
@@ -68,7 +78,85 @@ async function getDuration(filename) {
   return 0;
 }
 
+function handleFppEvent(line) {
+  const str = line.trim();
+  if (!str) return;
+  const parts = str.split('/');
+  const type = parts[0];
+
+  if (type === 'MediaSyncPacket' && parts.length >= 3) {
+    const filename = parts.slice(1, -1).join('/'); // handle filenames with slashes
+    const positionSec = parseFloat(parts[parts.length - 1]);
+    const changed = filename !== fppStatus.filename;
+    fppStatus = { playing: true, filename, positionSec };
+    if (changed) {
+      log(`[fifo] now playing: "${filename}" at ${positionSec.toFixed(3)}s`);
+      lastSyncPointAt = Date.now() + 6000;
+    }
+    broadcastPosition();
+    broadcastSyncPointIfDue();
+
+  } else if (type === 'MediaSyncStart' && parts.length >= 2) {
+    const filename = parts.slice(1).join('/');
+    log(`[fifo] MediaSyncStart: "${filename}"`);
+    const changed = filename !== fppStatus.filename;
+    fppStatus = { playing: true, filename, positionSec: 0 };
+    if (changed) lastSyncPointAt = Date.now() + 6000;
+    broadcastPosition();
+
+  } else if (type === 'MediaSyncStop' && parts.length >= 2) {
+    log(`[fifo] MediaSyncStop: "${parts.slice(1).join('/')}"`);
+    fppStatus = { playing: false, filename: fppStatus.filename, positionSec: fppStatus.positionSec };
+    broadcastPosition();
+  }
+}
+
+function startFifoListener() {
+  // Create FIFO if it doesn't exist
+  try {
+    execSync(`[ -p ${FIFO_PATH} ] || mkfifo ${FIFO_PATH}`);
+    execSync(`chmod 666 ${FIFO_PATH}`);
+  } catch (_) {}
+
+  let buf = '';
+
+  function openFifo() {
+    // Open in non-blocking mode first to avoid hanging if no writer
+    try {
+      const fd = fs.openSync(FIFO_PATH, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+      const stream = fs.createReadStream(null, { fd, flags: 'r' });
+
+      stream.on('data', (chunk) => {
+        lastFifoMsgAt = Date.now();
+        buf += chunk.toString();
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        lines.forEach(handleFppEvent);
+      });
+
+      stream.on('end', () => {
+        log('[fifo] writer closed, reopening...');
+        setTimeout(openFifo, 100);
+      });
+
+      stream.on('error', (err) => {
+        if (err.code !== 'EAGAIN') log(`[fifo] error: ${err.message}`);
+        setTimeout(openFifo, 1000);
+      });
+
+      log(`[fifo] listening on ${FIFO_PATH}`);
+    } catch (err) {
+      log(`[fifo] open failed: ${err.message}, retrying...`);
+      setTimeout(openFifo, 2000);
+    }
+  }
+
+  openFifo();
+}
+
+// HTTP polling — only used when FIFO hasn't received data recently
 async function pollFppStatus() {
+  if (Date.now() - lastFifoMsgAt < 2000) return;
   try {
     const res = await fetch(`${FPP_HOST}/api/fppd/status`, {
       signal: AbortSignal.timeout(2000),
@@ -81,18 +169,15 @@ async function pollFppStatus() {
     const changed = filename !== fppStatus.filename || playing !== fppStatus.playing;
     fppStatus = { playing, filename, positionSec };
     if (changed && filename) {
-      log(`now playing: "${filename}" at ${positionSec.toFixed(1)}s`);
-      // Delay first syncPoint by 4 seconds after song change.
-      // This gives all devices time to finish buffering the new audio
-      // before a syncPoint arrives — so they all receive the SAME syncPoint
-      // and seek to the same position.
-      lastSyncPointAt = Date.now() + 6000; // suppress syncPoints for 6s after song change
+      log(`[http] now playing: "${filename}" at ${positionSec.toFixed(1)}s`);
+      lastSyncPointAt = Date.now() + 6000;
     }
     broadcastPosition();
     broadcastSyncPointIfDue();
   } catch (_) {}
 }
 
+startFifoListener();
 setInterval(pollFppStatus, 250);
 pollFppStatus();
 
