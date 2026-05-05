@@ -1689,14 +1689,22 @@ if (!empty(trim((string)$ps))) {
     statusEl.className = 'of-status muted';
     const port = document.getElementById('audioDaemonPort')?.value || 8090;
     try {
-      // FPP has a built-in reverse proxy at /proxy/<host>:<port>/<path> that
-      // forwards requests to local services — same origin, no CORS issues.
-      const res = await fetch(`/proxy/127.0.0.1:${port}/health`, {
+      // Read the daemon log file via FPP's log API — same origin, no CORS.
+      // If the last meaningful line is "listening on port" (not SIGTERM), daemon is up.
+      const res = await fetch('/api/file/Logs/showpilot-audio.log', {
         signal: AbortSignal.timeout(4000),
       });
-      if (res.ok) {
-        const data = await res.json();
-        statusEl.textContent = `✓ Running v${data.version} on port ${port}`;
+      if (!res.ok) throw new Error('log not found');
+      const text = await res.text();
+      const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+      // Walk backwards to find last significant line
+      let lastState = null;
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (lines[i].includes('listening on port')) { lastState = 'running'; break; }
+        if (lines[i].includes('SIGTERM') || lines[i].includes('shutting down')) { lastState = 'stopped'; break; }
+      }
+      if (lastState === 'running') {
+        statusEl.textContent = `✓ Running on port ${port}`;
         statusEl.className = 'of-status success';
       } else {
         statusEl.textContent = 'Not running — restart FPP or run the install script';
