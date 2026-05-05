@@ -1,33 +1,28 @@
 #!/bin/bash
 # ShowPilot plugin postStart — runs every time fppd starts.
 #
-# This script is the single source of truth for getting the listener into a
-# correct state. It does THREE things on every fppd cycle:
-#
-#   1. Self-heals file permissions. Plugin files arrive from `git clone` /
-#      `git pull` without executable bits in some environments (Windows clones
-#      uploaded later, manual extracts, restored backups). Without exec bits,
-#      fppd cannot exec our command-button scripts ("Restart Listener", etc.)
-#      and they fail silently. We chmod every cycle so this can never bite the
-#      user, regardless of how the files arrived.
-#
-#   2. Kills any existing listener. Even though postStop should handle this,
-#      there are edge cases where a stale listener survives (postStop got
-#      skipped, kill signal lost, fppd hard-restarted). pkill catches them.
-#
-#   3. Spawns one fresh listener with the current code on disk.
-#
-# This sequence guarantees: after fppd restart, exactly one v-current listener
-# is running, all command buttons work, and no manual intervention is needed.
+# Uses a lock file to guard against FPP running postStart twice on some
+# versions, which caused the daemon to spawn twice and corrupt the relay
+# with interleaved bytes from two instances.
 
 PLUGIN_DIR="/home/fpp/media/plugins/showpilot"
 LOG_DIR="/home/fpp/media/logs"
 CONFIG_FILE="/home/fpp/media/config/plugin.showpilot"
+LOCK_FILE="/tmp/showpilot-poststart.lock"
 mkdir -p "$LOG_DIR"
 
-# 1. Self-heal permissions — make all command and script files executable.
-# Failures are silenced because we may not own every file (rare but possible),
-# and the postStart should not block on permission edge cases.
+# Guard against double-invocation — FPP calls postStart twice on some versions.
+# If another instance of this script is already running, exit immediately.
+if [ -f "$LOCK_FILE" ]; then
+    PID=$(cat "$LOCK_FILE" 2>/dev/null)
+    if kill -0 "$PID" 2>/dev/null; then
+        exit 0
+    fi
+fi
+echo $$ > "$LOCK_FILE"
+trap "rm -f '$LOCK_FILE'" EXIT
+
+# 1. Self-heal permissions
 chmod +x "$PLUGIN_DIR/commands/"*.php 2>/dev/null
 chmod +x "$PLUGIN_DIR/scripts/"*.sh 2>/dev/null
 chmod +x "$PLUGIN_DIR/showpilot_listener.php" 2>/dev/null
@@ -35,36 +30,21 @@ chmod +x "$PLUGIN_DIR/listener_status.php" 2>/dev/null
 chmod +x "$PLUGIN_DIR/extract_audio.php" 2>/dev/null
 chmod +x "$PLUGIN_DIR/audio_daemon_status.php" 2>/dev/null
 
-# Keep the plugin config writable by FPP's web/API process across older
-# installs, restores, and listener-created first-run files.
+# Keep the plugin config writable
 touch "$CONFIG_FILE" 2>/dev/null
 chown fpp:fpp "$CONFIG_FILE" 2>/dev/null
 chmod 666 "$CONFIG_FILE" 2>/dev/null
 
-# 2. Kill any existing listener. Idempotent — exit 0 if killed, 1 if none
-# found. Both fine here.
+# 2. Kill any existing processes
 pkill -f "php $PLUGIN_DIR/showpilot_listener.php" 2>/dev/null
-
-# Brief pause so SIGTERM takes effect cleanly before we spawn the replacement.
+pkill -f "node $PLUGIN_DIR/showpilot_audio.js" 2>/dev/null
 sleep 1
 
-# 3. Spawn the listener detached. We invoke PHP explicitly with /usr/bin/php
-# rather than relying on the shebang line — this means the listener works
-# even if its exec bit somehow ends up unset.
-# setsid prevents fppd from holding onto it as a child process; redirecting
-# stdio to /dev/null ensures the listener doesn't inherit any descriptors.
+# 3. Spawn listener
 setsid /usr/bin/php "$PLUGIN_DIR/showpilot_listener.php" \
     </dev/null >/dev/null 2>&1 &
 
-# ---- Audio daemon ----
-# Start the ShowPilot audio daemon if Node 18+ is available.
-# The daemon serves the currently-playing audio file as a live paced stream
-# on port 8090. ShowPilot (on the LXC) opens one connection and fans it out
-# to all viewer phones for automatic sync.
-# Kill any stale daemon first (same defensive pattern as the PHP listener).
-pkill -f "node $PLUGIN_DIR/showpilot_audio.js" 2>/dev/null
-sleep 0.5
-
+# 4. Spawn audio daemon if Node 18+ available
 if command -v node >/dev/null 2>&1; then
     NODE_MAJOR=$(node --version 2>/dev/null | sed 's/v//' | cut -d. -f1)
     if [ "${NODE_MAJOR:-0}" -ge 18 ]; then

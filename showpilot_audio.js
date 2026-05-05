@@ -42,9 +42,10 @@ const VERSION    = '1.0.0';
 const LOG_FILE = process.env.LOG_FILE || null;
 function log(...args) {
   const line = `[${new Date().toISOString()}] [showpilot-audio] ${args.join(' ')}\n`;
-  process.stderr.write(line);
   if (LOG_FILE) {
-    try { fs.appendFileSync(LOG_FILE, line); } catch (_) {}
+    try { fs.appendFileSync(LOG_FILE, line); } catch (_) { process.stderr.write(line); }
+  } else {
+    process.stderr.write(line);
   }
 }
 
