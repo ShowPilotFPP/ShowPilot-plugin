@@ -1688,8 +1688,11 @@ if (!empty(trim((string)$ps))) {
     statusEl.textContent = 'Checking…';
     statusEl.className = 'of-status muted';
     const port = document.getElementById('audioDaemonPort')?.value || 8090;
+    // Use the Pi's actual IP (window.location.hostname) not 127.0.0.1 —
+    // the browser is on the viewer's PC, not on the Pi itself.
+    const piHost = window.location.hostname;
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/health`, {
+      const res = await fetch(`http://${piHost}:${port}/health`, {
         signal: AbortSignal.timeout(3000),
       });
       if (res.ok) {
