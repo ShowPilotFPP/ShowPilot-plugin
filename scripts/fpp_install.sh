@@ -67,6 +67,16 @@ if [ "$NODE_OK" = "0" ]; then
     fi
 fi
 
+# ---- Install ws npm module for WebSocket support ----
+# Required for the audio daemon's position broadcast feature.
+PLUGIN_DIR="/home/fpp/media/plugins/showpilot"
+if command -v node >/dev/null 2>&1; then
+    if [ ! -d "$PLUGIN_DIR/node_modules/ws" ]; then
+        echo "Installing ws npm module..."
+        cd "$PLUGIN_DIR" && npm install ws --save 2>&1 || echo "WARN: npm install ws failed"
+    fi
+fi
+
 # Surface FPP's "Restart Required" banner in the plugin manager UI.
 # After the user clicks Restart, fppd cycles, postStop kills the listener,
 # postStart spawns a fresh one with the new code.
