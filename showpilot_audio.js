@@ -151,6 +151,8 @@ function startFifoListener() {
       if (n > 0) {
         lastFifoMsgAt = Date.now();
         buf += readBuf.slice(0, n).toString();
+        // Guard against unbounded buffer growth
+        if (buf.length > 65536) buf = buf.slice(-4096);
         const lines = buf.split('\n');
         buf = lines.pop();
         lines.forEach(handleFppEvent);
@@ -164,8 +166,8 @@ function startFifoListener() {
         return;
       }
     }
-    // Poll every 20ms — fast enough for 500ms sync updates from FPP
-    setTimeout(readLoop, 20);
+    // Poll every 100ms — FPP sends MediaSyncPacket every 500ms, 100ms is plenty
+    setTimeout(readLoop, 100);
   }
 
   openFifo();
