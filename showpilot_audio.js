@@ -85,13 +85,22 @@ function handleFppEvent(line) {
   const type = parts[0];
 
   if (type === 'MediaSyncPacket' && parts.length >= 3) {
-    const filename = parts.slice(1, -1).join('/'); // handle filenames with slashes
+    const filename = parts.slice(1, -1).join('/');
     const positionSec = parseFloat(parts[parts.length - 1]);
     const changed = filename !== fppStatus.filename;
     fppStatus = { playing: true, filename, positionSec };
     if (changed) {
       log(`[fifo] now playing: "${filename}" at ${positionSec.toFixed(3)}s`);
-      lastSyncPointAt = Date.now() + 6000;
+      // First packet after song change — suppress for 3s then fire syncPoint
+      // with accurate position so all devices coordinate on the same point.
+      lastSyncPointAt = Date.now() + 3000;
+      setTimeout(() => {
+        if (fppStatus.filename === filename && fppStatus.playing) {
+          lastSyncPointAt = 0;
+          broadcastSyncPointIfDue();
+          log(`[fifo] syncPoint triggered from first MediaSyncPacket for "${filename}"`);
+        }
+      }, 3100);
     }
     broadcastPosition();
     broadcastSyncPointIfDue();
@@ -99,19 +108,9 @@ function handleFppEvent(line) {
   } else if (type === 'MediaSyncStart' && parts.length >= 2) {
     const filename = parts.slice(1).join('/');
     log(`[fifo] MediaSyncStart: "${filename}"`);
-    const changed = filename !== fppStatus.filename;
     fppStatus = { playing: true, filename, positionSec: 0 };
-    if (changed) {
-      // Suppress syncPoints for 3s to let devices buffer, then force one
-      lastSyncPointAt = Date.now() + 3000;
-      setTimeout(() => {
-        if (fppStatus.filename === filename) {
-          lastSyncPointAt = 0; // allow syncPoint to fire immediately
-          broadcastSyncPointIfDue();
-          log(`[fifo] forced syncPoint after MediaSyncStart for "${filename}"`);
-        }
-      }, 3100);
-    }
+    // Suppress syncPoints until first MediaSyncPacket arrives with real position
+    lastSyncPointAt = Date.now() + 10000;
     broadcastPosition();
 
   } else if (type === 'MediaSyncStop' && parts.length >= 2) {
