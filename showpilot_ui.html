@@ -864,9 +864,9 @@ if (!empty(trim((string)$ps))) {
       </div>
 
       <p class="of-help">
-        ShowPilot's audio daemon runs on this Pi and streams the currently-playing
-        song directly to your ShowPilot server, which fans it out to all listener
-        phones simultaneously. This gives automatic sync — all phones hear the same
+        ShowPilot's audio daemon runs on this FPP instance and streams the currently-playing
+        song directly to your ShowPilot server, which then serves it out to all listener
+        devices simultaneously. This gives automatic sync — all phones hear the same
         bytes at the same moment, locked to what's coming out of your speakers.
       </p>
 
@@ -886,7 +886,7 @@ if (!empty(trim((string)$ps))) {
         <div>
           <div class="of-label">Daemon port</div>
           <div class="of-help">
-            Port the audio daemon listens on. Default is 8090. Must match the
+            Port that the audio daemon listens on. Default is 8090. Must match the
             "Daemon port" setting in your ShowPilot admin panel → Settings → Audio.
           </div>
         </div>
@@ -912,8 +912,8 @@ if (!empty(trim((string)$ps))) {
         <div>
           <div class="of-label">Test Connectivity</div>
           <div class="of-help">
-            Pings the ShowPilot server using the Show Token to verify it's reachable
-            and the token is correct.
+            Pings the ShowPilot server using the Show Token to verify that the server
+            is reachable and that the token is correct.
           </div>
         </div>
         <div class="of-control">

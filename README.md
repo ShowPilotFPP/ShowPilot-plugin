@@ -17,7 +17,7 @@ This plugin connects an FPP instance to your ShowPilot server. It reports playba
 
 ## Requirements
 
-- FPP 5.0 or newer (tested on FPP 9.5)
+- FPP 5.0 or newer (tested on FPP 9.5; FPP 10.0-beta compatibility verified via source-level API/build audit, not yet run on live 10.x hardware)
 - A running [ShowPilot](https://github.com/ShowPilotFPP/ShowPilot) server reachable from the FPP
 
 ## Install

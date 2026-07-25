@@ -6,6 +6,7 @@
 	"homeURL": "https://github.com/ShowPilotFPP/ShowPilot-plugin",
 	"srcURL": "https://github.com/ShowPilotFPP/ShowPilot-plugin.git",
 	"bugURL": "https://github.com/ShowPilotFPP/ShowPilot-plugin/issues",
+	"iconURL": "https://raw.githubusercontent.com/ShowPilotFPP/ShowPilot-plugin/main/icon.png",
 	"allowUpdates": 1,
 	"versions": [
 		{
@@ -32,6 +33,17 @@
 		},
 		{
 			"minFPPVersion": "9.0",
+			"maxFPPVersion": "9.99",
+			"branch": "main",
+			"sha": "",
+			"dependencies": {
+				"plugins": [],
+				"packages": [],
+				"scripts": []
+			}
+		},
+		{
+			"minFPPVersion": "10.0",
 			"maxFPPVersion": "0",
 			"branch": "main",
 			"sha": "",
