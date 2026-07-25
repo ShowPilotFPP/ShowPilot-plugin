@@ -74,9 +74,9 @@ if command -v node >/dev/null 2>&1; then
         PORT="$AUDIO_PORT" \
         MEDIA_ROOT="/home/fpp/media/music" \
         FPP_HOST="http://127.0.0.1" \
-        LOG_FILE="$LOG_DIR/showpilot-audio.log" \
+        LOG_FILE="$LOG_DIR/plugin-showpilot-audio.log" \
         setsid /usr/bin/node --max-old-space-size=64 "$PLUGIN_DIR/showpilot_audio.js" \
-            </dev/null >>"$LOG_DIR/showpilot-audio.log" 2>&1 &
+            </dev/null >>"$LOG_DIR/plugin-showpilot-audio.log" 2>&1 &
     fi
 fi
 

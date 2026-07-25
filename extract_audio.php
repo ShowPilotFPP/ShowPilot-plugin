@@ -43,7 +43,7 @@ include_once "/opt/fpp/www/common.php";
 // be either folder. config.php sets these globals.
 $musicDir = isset($musicDirectory) ? $musicDirectory : $settings['mediaDirectory'] . '/music';
 $videoDir = isset($videoDirectory) ? $videoDirectory : $settings['mediaDirectory'] . '/videos';
-$logFile = $settings['logDirectory'] . '/showpilot-listener.log';
+$logFile = $settings['logDirectory'] . '/plugin-showpilot.log';
 
 function elog($msg) {
     global $logFile;

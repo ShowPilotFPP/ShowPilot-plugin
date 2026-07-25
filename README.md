@@ -109,11 +109,14 @@ sudo systemctl restart apache2
 ```
 
 **Listener log location**
-`/home/fpp/media/logs/showpilot-listener.log`
+`/home/fpp/media/logs/plugin-showpilot.log`
 
 ```bash
-tail -f /home/fpp/media/logs/showpilot-listener.log
+tail -f /home/fpp/media/logs/plugin-showpilot.log
 ```
+
+**Audio daemon log location**
+`/home/fpp/media/logs/plugin-showpilot-audio.log`
 
 **Plugin queues wrong song**
 Make sure you've clicked **Sync Playlist** in the plugin UI after any changes to your FPP playlist contents/order.

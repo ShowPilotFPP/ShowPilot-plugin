@@ -18,7 +18,7 @@ include_once "/opt/fpp/www/common.php";
 
 $pluginName = basename(dirname(__FILE__));
 $pluginPath = $settings['pluginDirectory'] . "/" . $pluginName . "/";
-$logFile = $settings['logDirectory'] . "/" . $pluginName . "-listener.log";
+$logFile = $settings['logDirectory'] . "/plugin-" . $pluginName . ".log";
 $pluginConfigFile = $settings['configDirectory'] . "/plugin." . $pluginName;
 
 function logEntry($data) {

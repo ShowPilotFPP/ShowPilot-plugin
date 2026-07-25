@@ -42,14 +42,14 @@ AUDIO_PORT=$(grep -E '^audioDaemonPort' "$CONFIG_FILE" 2>/dev/null | cut -d'"' -
 PORT="$AUDIO_PORT" \
 MEDIA_ROOT="/home/fpp/media/music" \
 FPP_HOST="http://127.0.0.1" \
-LOG_FILE="$LOG_DIR/showpilot-audio.log" \
+LOG_FILE="$LOG_DIR/plugin-showpilot-audio.log" \
 setsid /usr/bin/node --max-old-space-size=64 "$PLUGIN_DIR/showpilot_audio.js" \
-    </dev/null >>"$LOG_DIR/showpilot-audio.log" 2>&1 &
+    </dev/null >>"$LOG_DIR/plugin-showpilot-audio.log" 2>&1 &
 
 sleep 1
 NEW_PID=$(cat "$PID_FILE" 2>/dev/null)
 if [ -n "$NEW_PID" ] && kill -0 "$NEW_PID" 2>/dev/null; then
     echo "Daemon started (pid $NEW_PID)"
 else
-    echo "WARNING: daemon may not have started — check $LOG_DIR/showpilot-audio.log"
+    echo "WARNING: daemon may not have started — check $LOG_DIR/plugin-showpilot-audio.log"
 fi
