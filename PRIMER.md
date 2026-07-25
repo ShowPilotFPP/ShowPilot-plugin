@@ -169,6 +169,7 @@ Same as the other ShowPilot repos:
 | 0.13.41 | Fix PHP 8 crash in `applyPlaylistPatches`: stdClass objects require `->` not `[]`. |
 | 0.13.63 | Race mode: `raceWinner` field handling; `effectiveInterrupt` for race winner playback. |
 | 0.13.64 | `set_mode_race.php` scheduler command. Activates Race mode via `POST /api/plugin/viewer-mode`. |
+| 0.13.66 | FPP 10.0-beta compatibility audit (source-level, not live-tested): MultiSyncPlugin ABI, build system paths, and all REST endpoints used by the plugin confirmed unchanged. `pluginInfo.json` split the open-ended "9.0+" entry into 9.0–9.99 and an explicit 10.0+ entry. |
 
 ---
 
