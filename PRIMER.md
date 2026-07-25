@@ -146,6 +146,17 @@ ShowPilot v0.33.155+ introduced Race mode — a tap-to-win competitive viewer in
 
 ---
 
+## FPP plugin-manager compatibility (v0.13.66+)
+
+FPP's 10.x-beta Plugin Manager (July 2026) resolves each plugin's "Open" button URL by statically scanning `content_menu.inc`/`menu.inc` for a literal, quoted `page=....php` value, rather than executing the file the way FPP's nav sidebar does. Two consequences to keep in mind for any future menu link changes:
+
+- **`nopage=1` must always precede `page=...` in the href.** The scanner's regex extracts `page=` by substring, not real query parsing, and `"nopage=1"` contains the substring `"page=1"`. If it lands after the real `page=`, the scanner grabs `"1"` instead and the Open button 404s. Always write `...&nopage=1&page=...`.
+- **The page value must be a literal, static `.php` filename that exists in the plugin dir** — not a variable or a computed URL. If a future menu entry needs to point somewhere dynamic (a different host/port, etc.), route it through a small static `.php` redirect file the scanner can find, and do the dynamic computation inside that file at request time. `ShowPilot-Lite`'s `open.php` (added in Lite v0.5.47) is the reference pattern for this.
+
+If FPP's scanner logic changes again, re-check `www/api/controllers/plugin.php` in `FalconChristmas/fpp` (functions `_PluginGetBestPageUrl`, `_PluginScanMenuPagesRaw`, `_PluginExtractPageFromHtml`, `_PluginExtractPageFromRaw`) before assuming a fix still holds.
+
+---
+
 ## Working style
 
 Same as the other ShowPilot repos:
@@ -169,6 +180,7 @@ Same as the other ShowPilot repos:
 | 0.13.41 | Fix PHP 8 crash in `applyPlaylistPatches`: stdClass objects require `->` not `[]`. |
 | 0.13.63 | Race mode: `raceWinner` field handling; `effectiveInterrupt` for race winner playback. |
 | 0.13.64 | `set_mode_race.php` scheduler command. Activates Race mode via `POST /api/plugin/viewer-mode`. |
+| 0.13.66 | Fix "Open" button in FPP's new 10.x-beta (July 2026) Plugin Manager, which linked to a broken page (404: `requesting a page that doesn't exist: showpilot/1`). Cause: FPP's plugin-manager scanner extracts a plugin's page URL from `content_menu.inc` via a substring regex, not real query parsing — our href had `page=showpilot_ui.html&nopage=1`, and `"nopage=1"` itself contains the substring `"page=1"`, so the scanner's greedy match grabbed `"1"` as the page instead of `showpilot_ui.html`. Fix: reorder to `nopage=1&page=showpilot_ui.html` (nopage before page). Verified against FPP's actual scanner source (`www/api/controllers/plugin.php`, `FalconChristmas/fpp` master) before shipping. The same underlying bug hit `ShowPilot-Lite`'s `menu.inc`, fixed there in Lite v0.5.47 — see that repo's primer for the fuller writeup (Lite's fix also needed a new static redirect page since its Open target is an external, dynamically-computed URL). |
 
 ---
 
