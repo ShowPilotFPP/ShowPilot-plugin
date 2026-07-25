@@ -58,13 +58,21 @@ fi
 
 if [ "$NODE_OK" = "0" ]; then
     echo "Installing Node.js 22..."
-    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - 2>&1
+    # Add the NodeSource apt repo directly (GPG key + sources.list.d entry)
+    # instead of piping their setup script into a shell.
+    apt-get install -y ca-certificates gnupg
+    mkdir -p /etc/apt/keyrings
+    curl -fsSL --connect-timeout 10 --max-time 30 https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+        | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
+        > /etc/apt/sources.list.d/nodesource.list
+    apt-get update
     apt-get install -y nodejs 2>&1
     if command -v node >/dev/null 2>&1; then
         echo "Node.js $(node --version) installed successfully"
     else
         echo "WARN: Node.js installation failed — audio daemon will not start"
-        echo "WARN: Install manually: curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y nodejs"
+        echo "WARN: Install manually — see https://github.com/nodesource/distributions#installation-instructions"
     fi
 fi
 

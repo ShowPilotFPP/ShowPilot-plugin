@@ -26,4 +26,4 @@ disown
 
 echo
 echo -e "${GREEN}✓ Deploy complete. Tail the log to verify:${NC}"
-echo "  tail -f /home/fpp/media/logs/showpilot-listener.log"
+echo "  tail -f /home/fpp/media/logs/plugin-showpilot.log"
