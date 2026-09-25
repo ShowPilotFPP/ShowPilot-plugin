@@ -1,152 +1,50 @@
 #!/bin/bash
-# ShowPilot plugin install script
+# ShowPilot install — run by FPP after cloning the plugin, and again by
+# "Reinstall All Plugins". Safe to run repeatedly.
 #
-# Runs after FPP clones the repo on initial install, AND optionally when the
-# user clicks "Run Install Script" or updates the plugin via FPP's plugin
-# manager. Does NOT reliably run on every Update click — different FPP
-# versions handle this differently.
-#
-# Strategy: keep this minimal and let FPP's normal restart flow handle the
-# actual listener swap. We set restartFlag=1 to surface FPP's "Restart
-# Required" banner; user clicks it; fppd cycles; postStop kills the listener;
-# postStart spawns a fresh one with the new code. Same pattern Remote Falcon
-# uses — proven to work reliably across FPP versions.
-#
-# set -e / pipefail: without these, any command below can fail and the
-# script just keeps going, reporting "success" to FPP's plugin manager even
-# though (say) the git sync or a permissions fix silently didn't happen.
-# Steps that are meant to fail soft (network hiccups, optional Node/C++
-# build steps) are explicitly guarded with `|| true` / a WARN echo below —
-# everything else is now fail-fast on purpose.
+# Fail fast, except for the steps explicitly marked best-effort below.
 set -e
 set -o pipefail
 
-. ${FPPDIR}/scripts/common
+. "$(dirname "${BASH_SOURCE[0]}")/showpilot_env.sh"
 
-# Derive our own install location instead of hardcoding it. FPP names this
-# directory after pluginInfo.json's repoName verbatim (case-sensitive, no
-# normalization — confirmed in FPP's InstallPluginFromInfo()), and that name
-# has changed once already (fpp-data#209 fallout: repoName went from
-# "showpilot" to "ShowPilot-plugin" to satisfy a bot check, which broke every
-# script here that had "/home/fpp/media/plugins/showpilot" hardcoded). Since
-# FPP always invokes this script by its own full path
-# (${PLUGINDIR}/$1/scripts/fpp_install.sh — see FPP's install_plugin/
-# runPluginInstallScript), deriving PLUGIN_DIR from our own location is
-# correct no matter what the directory is actually named, now or after any
-# future rename.
-PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PLUGIN_NAME="$(basename "$PLUGIN_DIR")"
-# NOTE: this is unrelated to CONFIG_FILE below. The settings-file suffix
-# ("plugin.showpilot") is a fixed key our PHP has always used with
-# FPP's WriteSettingToFile()/configDirectory convention — it must stay
-# "showpilot" forever regardless of the install directory name, or every
-# existing user's saved ShowPilot settings (including their show token)
-# would silently stop loading.
-CONFIG_FILE="/home/fpp/media/config/plugin.showpilot"
+ensure_runtime_files
+chown -R fpp:fpp "$PLUGIN_DIR"
+chmod +x "$PLUGIN_DIR"/commands/*.php "$PLUGIN_DIR"/scripts/*.sh
 
-# Force-sync with origin/main, discarding any local changes.
-# (Plugin code lives entirely in the repo — there shouldn't be any
-#  local edits worth preserving. User config lives in
-#  /home/fpp/media/config/plugin.showpilot, separate.)
-if [ -d "$PLUGIN_DIR/.git" ]; then
-    cd "$PLUGIN_DIR"
-    git fetch origin 2>&1 || echo "WARN: git fetch failed (no internet?)"
-    git reset --hard origin/main 2>&1 || echo "WARN: git reset failed"
+# ---- Node.js (audio daemon) ----
+# Debian's own nodejs package. FPP 10+ also installs it from pluginInfo.json's
+# dependencies; this covers older releases. Best-effort: without Node the
+# listener still works, only the audio daemon is skipped.
+if ! node_ok; then
+    echo "Installing Node.js from the Debian archive..."
+    apt-get install -y nodejs npm || echo "WARN: Node.js install failed — the audio daemon will not start"
 fi
-
-# Ensure correct ownership. Not fatal if it fails (e.g. unexpected FS
-# permissions on some hosts) — the rest of the install can still succeed.
-chown -R fpp:fpp "$PLUGIN_DIR" 2>/dev/null || true
-
-# Older FPP installs can leave plugin config owned by the listener user only.
-# The web UI/API must also be able to update it when settings are changed.
-# chown to fpp:fpp + chmod 660 (not 666) covers this: fppd, the CLI listener,
-# and the web server's PHP handler all run as `fpp` on every FPP image we
-# support, so group access is enough — no need to make the file holding the
-# ShowPilot show token writable by every user on the host.
-touch "$CONFIG_FILE" 2>/dev/null || true
-chown fpp:fpp "$CONFIG_FILE" 2>/dev/null || true
-chmod 660 "$CONFIG_FILE" 2>/dev/null || true
-
-# Make all command scripts and lifecycle scripts executable so FPP can run them.
-# (git-tracked exec bit doesn't always survive every install path, so we do this
-#  explicitly here to be safe.)
-chmod +x "$PLUGIN_DIR/commands/"*.php 2>/dev/null || true
-chmod +x "$PLUGIN_DIR/scripts/"*.sh 2>/dev/null || true
-
-# ---- Node.js installation ----
-# Required for the ShowPilot audio daemon (showpilot_audio.js).
-# Node 18 and 20 are both EOL (April 2025 and April 2026 respectively) — pin
-# to 22 (Maintenance LTS, supported through April 2027) as the minimum floor.
-# If Node 22+ is already installed, this block is skipped entirely.
-NODE_OK=0
-if command -v node >/dev/null 2>&1; then
-    NODE_MAJOR=$(node --version 2>/dev/null | sed 's/v//' | cut -d. -f1)
-    if [ "${NODE_MAJOR:-0}" -ge 22 ]; then
-        NODE_OK=1
-        echo "Node.js $(node --version) already installed — skipping install"
-    fi
-fi
-
-if [ "$NODE_OK" = "0" ]; then
-    echo "Installing Node.js 22..."
-    # Add the NodeSource apt repo directly (GPG key + sources.list.d entry)
-    # instead of piping their setup script into a shell.
-    # This whole block is best-effort: a network hiccup or apt issue here
-    # shouldn't abort the rest of the install (C++ plugin build, restart
-    # flag) — we warn and continue via the command-v check right below.
-    apt-get install -y ca-certificates gnupg || true
-    mkdir -p /etc/apt/keyrings || true
-    curl -fsSL --connect-timeout 10 --max-time 30 https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
-        | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg || true
-    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" \
-        > /etc/apt/sources.list.d/nodesource.list || true
-    apt-get update || true
-    apt-get install -y nodejs 2>&1 || true
-    if command -v node >/dev/null 2>&1; then
-        echo "Node.js $(node --version) installed successfully"
-    else
-        echo "WARN: Node.js installation failed — audio daemon will not start"
-        echo "WARN: Install manually — see https://github.com/nodesource/distributions#installation-instructions"
-    fi
-fi
-
-# ---- Install ws npm module for WebSocket support ----
-# Required for the audio daemon's position broadcast feature.
-# (PLUGIN_DIR already derived above — no need to redeclare it here.)
-if command -v node >/dev/null 2>&1; then
-    if [ ! -d "$PLUGIN_DIR/node_modules/ws" ]; then
-        echo "Installing ws npm module..."
-        cd "$PLUGIN_DIR" && npm install ws --save 2>&1 || echo "WARN: npm install ws failed"
-    fi
-fi
-
-# ---- Build C++ MultiSync plugin ----
-# FPP dlopen()s "lib<plugin-dir-name>.so" (see Makefile) — compute it from
-# PLUGIN_NAME so this still finds the right file after any future rename.
-# Also clean up filenames used at various points in this plugin's history.
-rm -f "$PLUGIN_DIR/libfpp-showpilot-sync.so" 2>/dev/null || true
-rm -f "$PLUGIN_DIR/libshowpilot.so" 2>/dev/null || true
-rm -f "$PLUGIN_DIR/lib${PLUGIN_NAME}.so" 2>/dev/null || true
-
-if [ -f "$PLUGIN_DIR/Makefile" ] && [ -d "/opt/fpp/src" ]; then
-    echo "Building ShowPilot MultiSync plugin..."
-    cd "$PLUGIN_DIR" && make clean && make 2>&1 && echo "ShowPilot MultiSync plugin built successfully" || echo "WARN: C++ plugin build failed — falling back to HTTP polling"
+if node_ok; then
+    install_node_modules || echo "WARN: npm install failed — WebSocket position sync disabled"
 else
-    echo "WARN: FPP source not found at /opt/fpp/src — skipping C++ plugin build"
+    echo "WARN: Node.js ${MIN_NODE_MAJOR}+ not available — the audio daemon will not start"
 fi
 
-# Surface FPP's "Restart Required" banner in the plugin manager UI.
-# After the user clicks Restart, fppd cycles, postStop kills the listener,
-# postStart spawns a fresh one with the new code.
-#
-# Keep this unconditional. pluginInfo.json's versions[] range spans FPP
-# releases from before plugin hot-load/unload existed through FPP 10+ on a
-# single branch/sha — so even though this plugin is structurally safe to
-# hot-load on FPP versions that support it, older installs in that same
-# range still need the full fppd restart to pick up new code. Only drop
-# this call if versions[] is ever split so a dedicated FPP-10+-only entry
-# can rely on hot-load instead.
+# ---- C++ MultiSync plugin ----
+# fppd dlopen()s lib<install-dir-name>.so (see Makefile). Best-effort: without
+# it the audio daemon falls back to polling fppd over HTTP.
+rm -f "$PLUGIN_DIR/libfpp-showpilot-sync.so" "$PLUGIN_DIR/libshowpilot.so" "$PLUGIN_DIR/lib${PLUGIN_NAME}.so"
+if [ -f "$PLUGIN_DIR/Makefile" ] && [ -d "$SRCDIR" ]; then
+    echo "Building ShowPilot MultiSync plugin..."
+    if (cd "$PLUGIN_DIR" && make clean && make "SRCDIR=${SRCDIR}"); then
+        echo "ShowPilot MultiSync plugin built successfully"
+    else
+        echo "WARN: C++ plugin build failed — falling back to HTTP polling"
+    fi
+else
+    echo "WARN: FPP source not found at $SRCDIR — skipping C++ plugin build"
+fi
+
+remove_legacy_csp_origin
+
+# FPP 10+ loads the plugin live after install; older releases in
+# pluginInfo.json's versions[] range need an fppd restart to pick it up.
 setSetting restartFlag 1
 
 #fpp_install

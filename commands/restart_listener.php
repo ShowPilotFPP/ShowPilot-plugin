@@ -2,51 +2,36 @@
 <?php
 // ShowPilot — Restart Listener
 //
-// Defensive kill-then-spawn restart. Earlier versions tried to detect whether a
-// listener was already running and only spawn one if not — but several edge
-// cases (rapid double-clicks from the UI, stale browser-side polls, race
-// conditions between detection and spawn) led to duplicate listeners
-// accumulating. Killing first eliminates the entire class of bug: no detection
-// = no detection failure = no duplicates.
-//
-// `pkill -f` matches the full command line including the script path, so we
-// won't accidentally kill an unrelated PHP process.
+// Kill-then-spawn rather than "start only if not running": detecting a
+// running listener raced with rapid double-clicks and stale UI polls and let
+// duplicate listeners accumulate. Killing first removes that whole class of
+// bug. `pkill -f` matches the full script path, so no unrelated PHP process
+// is touched.
 
 $skipJSsettings = true;
-include_once "/opt/fpp/www/config.php";
-include_once "/opt/fpp/www/common.php";
-// Fixed settings-file key (WriteSettingToFile's $plugin arg becomes
-// "plugin.<name>" under configDirectory) — independent of the install
-// directory name below, and must stay "showpilot" forever so it keeps
-// pointing at every existing user's already-saved settings file.
-$pluginName = "showpilot";
+require_once dirname(__DIR__) . '/showpilot_common.php';
 
-// Derived, not hardcoded. This file lives at "<plugin-dir>/commands/", so
-// dirname(__DIR__) is the plugin's actual on-disk directory regardless of
-// what pluginInfo.json's repoName is set to (fpp-data#209 fallout — see
-// scripts/fpp_install.sh for the full story of why this can no longer be
-// a literal string here).
-$pluginDir = dirname(__DIR__);
-$listenerPath = $pluginDir . "/showpilot_listener.php";
+$listenerPath = dirname(__DIR__) . "/showpilot_listener.php";
 
-WriteSettingToFile("listenerEnabled", urlencode("true"), $pluginName);
-WriteSettingToFile("listenerRestarting", urlencode("true"), $pluginName);
+WriteSettingToFile("listenerEnabled", urlencode("true"), SP_SETTINGS_KEY);
+WriteSettingToFile("listenerRestarting", urlencode("true"), SP_SETTINGS_KEY);
 
-// Step 1: kill any existing listener processes.
-// pkill exit codes: 0 = killed something, 1 = nothing matched. Both are fine.
+// pkill exits 1 when nothing matched; either outcome is fine.
 @shell_exec("/usr/bin/pkill -f " . escapeshellarg($listenerPath) . " 2>/dev/null");
 
-// Step 2: give the OS a moment for SIGTERM to take effect cleanly.
-// 500ms is plenty for a PHP CLI process to exit on signal.
+// Give SIGTERM a moment to land before spawning the replacement.
 usleep(500000);
 
-// Step 3: spawn one fresh detached process.
-// setsid + I/O redirection prevents PHP's shell_exec from holding onto the
-// child or being held by it. The `&` backgrounds.
-$cmd = '/usr/bin/setsid /usr/bin/php ' . escapeshellarg($listenerPath) . ' </dev/null >/dev/null 2>&1 &';
-@shell_exec($cmd);
+// fppd runs commands as root; the listener doesn't need it (see
+// scripts/showpilot_env.sh). setpriv execs in place, so pkill still matches.
+$dropRoot = (function_exists('posix_geteuid') && posix_geteuid() === 0 && is_executable('/usr/bin/setpriv'))
+    ? '/usr/bin/setpriv --reuid=fpp --regid=fpp --init-groups '
+    : '';
 
-// Step 4: brief pause so the caller (typically the UI) can immediately re-poll
-// for status and see the new listener as already running.
+// setsid + full redirection detaches the child so shell_exec() returns
+// immediately. PHP errors land in the plugin log alongside its own lines.
+@shell_exec('/usr/bin/setsid ' . $dropRoot . '/usr/bin/php ' . escapeshellarg($listenerPath)
+    . ' </dev/null >>' . escapeshellarg(sp_log_file()) . ' 2>&1 &');
+
+// Brief pause so the UI's immediate status re-poll already sees it running.
 usleep(200000);
-?>

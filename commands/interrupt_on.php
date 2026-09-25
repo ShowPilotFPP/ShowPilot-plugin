@@ -1,10 +1,8 @@
 #!/usr/bin/env php
 <?php
+// ShowPilot — Turn Interrupt Schedule On
 $skipJSsettings = true;
-include_once "/opt/fpp/www/config.php";
-include_once "/opt/fpp/www/common.php";
-$pluginName = "showpilot";
+require_once dirname(__DIR__) . '/showpilot_common.php';
 
-WriteSettingToFile("interruptSchedule", urlencode("true"), $pluginName);
-WriteSettingToFile("listenerRestarting", urlencode("true"), $pluginName);
-?>
+WriteSettingToFile("interruptSchedule", urlencode("true"), SP_SETTINGS_KEY);
+WriteSettingToFile("listenerRestarting", urlencode("true"), SP_SETTINGS_KEY);

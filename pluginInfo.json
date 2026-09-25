@@ -2,7 +2,7 @@
 	"repoName": "showpilot-plugin",
 	"name": "ShowPilot Plugin",
 	"author": "ShowPilot Project",
-	"description": "Connects FPP to a self-hosted ShowPilot server for audio playback, viewer voting, and jukebox control.",
+	"description": "Connects FPP to a self-hosted ShowPilot server for viewer voting, jukebox requests and phone audio sync/playback. Sends what is playing, your request playlist's song list and, when you click Sync, those songs' audio to that server. Runs an audio server on your local network (port 8090 by default) once a server is configured, and, if you turn on ShowPilot's cooldown-skip option, skips songs in cooldown during your normal playlist rotation.",
 	"homeURL": "https://github.com/ShowPilotFPP/ShowPilot-plugin",
 	"srcURL": "https://github.com/ShowPilotFPP/ShowPilot-plugin.git",
 	"bugURL": "https://github.com/ShowPilotFPP/ShowPilot-plugin/issues",
@@ -15,45 +15,61 @@
 			"minFPPVersion": "5.0",
 			"maxFPPVersion": "7.99",
 			"branch": "main",
-			"sha": "",
-			"dependencies": {
-				"plugins": [],
-				"packages": [],
-				"scripts": []
-			}
+			"sha": ""
 		},
 		{
 			"minFPPVersion": "8.0",
 			"maxFPPVersion": "8.99",
 			"branch": "main",
-			"sha": "",
-			"dependencies": {
-				"plugins": [],
-				"packages": [],
-				"scripts": []
-			}
+			"sha": ""
 		},
 		{
 			"minFPPVersion": "9.0",
 			"maxFPPVersion": "9.99",
 			"branch": "main",
-			"sha": "",
-			"dependencies": {
-				"plugins": [],
-				"packages": [],
-				"scripts": []
-			}
+			"sha": ""
 		},
 		{
 			"minFPPVersion": "10.0",
 			"maxFPPVersion": "0",
 			"branch": "main",
-			"sha": "",
-			"dependencies": {
-				"plugins": [],
-				"packages": [],
-				"scripts": []
-			}
+			"sha": ""
 		}
-	]
+	],
+	"privacy": {
+		"summary": "Links FPP to your own ShowPilot server so visitors can vote for and request songs. Sends what is playing and, when you sync, your song list and audio to that server.",
+		"sends": [
+			{
+				"to": "your ShowPilot server",
+				"what": "the song playing, its position, the plugin version and your request playlist's songs",
+				"why": "so the viewer page can display the show and queue votes and requests",
+				"alwaysOn": false
+			},
+			{
+				"to": "your ShowPilot server",
+				"what": "audio from the songs in your request playlist, only when you click Sync Now",
+				"why": "so ShowPilot can play the show's audio on visitors' mobile devices",
+				"alwaysOn": false
+			}
+		],
+		"collects": [],
+		"sensors": [],
+		"remoteAccess": "lan",
+		"systemChanges": [
+			{
+				"kind": "network",
+				"what": "audio server on port 8090 (configurable) sharing your music files and playback position with your network"
+			},
+			{
+				"kind": "service",
+				"what": "a background listener and audio daemon that starts and stops with FPP"
+			},
+			{
+				"kind": "core-settings",
+				"what": "keeps its own \"ShowPilot Queue\" playlist and a cooldown list file in FPP's playlist and config folders"
+			}
+		],
+		"closedCode": false,
+		"other": "Visitor votes and requests are received and stored by your ShowPilot server, not on this FPP instance. The show token is kept in plugindata/, readable only by the plugin."
+	}
 }

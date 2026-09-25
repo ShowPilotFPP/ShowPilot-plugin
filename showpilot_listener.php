@@ -22,99 +22,30 @@ if (php_sapi_name() !== 'cli') {
     exit("ShowPilot listener runs as a background service only — not accessible via the web server.\n");
 }
 
-// Suppress FPP web UI JS output when running from CLI
 $skipJSsettings = true;
-include_once "/opt/fpp/www/config.php";
-include_once "/opt/fpp/www/common.php";
-
-// Fixed settings-file key, NOT the install directory name — every other
-// file in this plugin (showpilot_config.php, showpilot_ui.html, every
-// commands/*.php) hardcodes $pluginName = "showpilot" for exactly this
-// reason: it addresses the config file, log file, and WriteSettingToFile()
-// calls that must stay stable regardless of where FPP actually installs
-// this plugin. This file was the one exception, computing it from its own
-// directory instead (basename(dirname(__FILE__))) — harmless while the
-// install directory happened to be named "showpilot", but as of v0.13.74
-// the real directory is "showpilot-plugin", so this alone started reading
-// and writing a DIFFERENT config file (plugin.showpilot-plugin, freshly
-// empty) and a DIFFERENT log file (plugin-showpilot-plugin.log) than every
-// other part of the plugin — silently dropping serverUrl/showToken to
-// empty, which made every outbound report to ShowPilot's server a silent
-// no-op (see ofHttp()'s empty-credential guard). Found live: the ShowPilot
-// server showed the plugin as Offline, last seen over an hour ago, still
-// reporting version 0.13.73 — because the listener had stopped writing
-// anywhere the rest of the plugin (or a human) would think to look.
-$pluginName = "showpilot";
-$pluginPath = $settings['pluginDirectory'] . "/" . basename(dirname(__FILE__)) . "/";
-$logFile = $settings['logDirectory'] . "/plugin-" . $pluginName . ".log";
-$pluginConfigFile = $settings['configDirectory'] . "/plugin." . $pluginName;
+require_once __DIR__ . '/showpilot_common.php';
 
 function logEntry($data) {
-    global $logFile;
-    $fp = @fopen($logFile, "a");
-    if ($fp === false) {
-        error_log("ShowPilot listener cannot open log file: " . $logFile . " | " . $data);
-        return;
-    }
-    fwrite($fp, "[" . date("Y-m-d H:i:s") . "] " . $data . "\n");
-    fclose($fp);
+    sp_log($data);
 }
 
 function logEntry_verbose($data) {
-    if (isset($GLOBALS['verboseLogging']) && $GLOBALS['verboseLogging'] === true) {
-        logEntry($data);
+    if (!empty($GLOBALS['cfg']['verboseLogging'])) {
+        sp_log($data);
     }
-}
-
-// ============================================================
-// smartDecode — tolerant decoder for plugin config values
-// ============================================================
-// The plugin has THREE write paths to plugin.showpilot, and they don't all
-// use the same encoding:
-//   1. FPP's native /api/plugin/<plugin>/settings/<key>     → URL-encoded
-//   2. showpilot_config.php (per-key bypass endpoint)       → URL-encoded
-//   3. savePluginSettingViaConfigFile / Developer raw editor → plain text
-// A blind urldecode() works fine for path 1 & 2, and is mostly a no-op for
-// path 3 — except for plain values that happen to contain '+' (which
-// urldecode turns into a space) or '%XX' sequences (decoded unexpectedly).
-// We detect URL-encoding by looking for %XX patterns; if absent, we assume
-// the value is already plain and return it as-is. This makes the listener
-// tolerant of all three write paths, including users hand-editing the config
-// in Developer mode.
-function smartDecode($value) {
-    if ($value === null || $value === '') return $value;
-    // %XX with hex digits is the unambiguous signal of URL-encoding.
-    if (preg_match('/%[0-9a-fA-F]{2}/', $value)) {
-        return urldecode($value);
-    }
-    return $value;
 }
 
 // ============================================================
 // Init defaults
 // ============================================================
 
-$pluginSettings = parse_ini_file($pluginConfigFile);
-
-// First-run: create the config file if it doesn't exist
-if (!file_exists($pluginConfigFile)) {
-    @touch($pluginConfigFile);
-}
-// 0660, not 0666 — this CLI daemon and the web-invoked showpilot_config.php
-// both run as the `fpp` user on every FPP image we support, so group access
-// already covers every legitimate writer. See showpilot_config.php for the
-// same fix applied to its two write paths.
-@chmod($pluginConfigFile, 0660);
-$pluginSettings = @parse_ini_file($pluginConfigFile);
-if ($pluginSettings === false) $pluginSettings = array();
-
 logEntry("Starting ShowPilot Plugin v" . $PLUGIN_VERSION);
 
-WriteSettingToFile("pluginVersion", urlencode($PLUGIN_VERSION), $pluginName);
+WriteSettingToFile("pluginVersion", urlencode($PLUGIN_VERSION), SP_SETTINGS_KEY);
 
+// showToken is deliberately absent: it lives in plugindata/, not config/.
 $defaults = array(
     'serverUrl'             => '',
-    'showToken'             => '',
     'remotePlaylist'        => '',
     'interruptSchedule'     => 'false',
     'requestFetchTime'      => '3',
@@ -125,28 +56,31 @@ $defaults = array(
     'listenerEnabled'       => 'true',
     'listenerRestarting'    => 'false',
 );
+$pluginSettings = sp_read_config();
 foreach ($defaults as $key => $val) {
-    if (!isset($pluginSettings[$key]) || strlen(urldecode($pluginSettings[$key])) < 1) {
-        WriteSettingToFile($key, urlencode($val), $pluginName);
+    if (sp_setting($pluginSettings, $key) === '') {
+        WriteSettingToFile($key, urlencode($val), SP_SETTINGS_KEY);
     }
 }
-$pluginSettings = parse_ini_file($pluginConfigFile);
 
-// Load runtime settings
 function loadRuntimeSettings() {
-    global $pluginConfigFile;
-    $s = parse_ini_file($pluginConfigFile);
-    if ($s === false) return null;
+    $s = sp_read_config();
+    if (empty($s)) return null;
+    $rawUrl = rtrim(sp_setting($s, 'serverUrl'), '/');
+    $serverUrl = sp_server_url($s);
+    if ($rawUrl !== '' && $serverUrl === '') {
+        logEntry("WARNING - Server URL '$rawUrl' is not a plain http(s) URL; ignoring it.");
+    }
     return array(
-        'serverUrl'          => rtrim(smartDecode($s['serverUrl']), '/'),
-        'showToken'          => smartDecode($s['showToken']),
-        'remotePlaylist'     => smartDecode($s['remotePlaylist']),
-        'interruptSchedule'  => smartDecode($s['interruptSchedule']) === 'true',
-        'requestFetchTime'   => max(1, intVal(smartDecode($s['requestFetchTime']))),
-        'additionalWaitTime' => max(0, intVal(smartDecode($s['additionalWaitTime']))),
-        'fppStatusCheckTime' => max(0.5, floatval(smartDecode($s['fppStatusCheckTime']))),
-        'heartbeatIntervalSec' => max(5, intVal(smartDecode($s['heartbeatIntervalSec']))),
-        'verboseLogging'     => smartDecode($s['verboseLogging']) === 'true',
+        'serverUrl'            => $serverUrl,
+        'showToken'            => sp_get_show_token(),
+        'remotePlaylist'       => sp_setting($s, 'remotePlaylist'),
+        'interruptSchedule'    => sp_setting($s, 'interruptSchedule') === 'true',
+        'requestFetchTime'     => max(1, intval(sp_setting($s, 'requestFetchTime'))),
+        'additionalWaitTime'   => max(0, intval(sp_setting($s, 'additionalWaitTime'))),
+        'fppStatusCheckTime'   => max(0.5, floatval(sp_setting($s, 'fppStatusCheckTime'))),
+        'heartbeatIntervalSec' => max(5, intval(sp_setting($s, 'heartbeatIntervalSec'))),
+        'verboseLogging'       => sp_setting($s, 'verboseLogging') === 'true',
     );
 }
 
@@ -155,67 +89,12 @@ if ($cfg === null) {
     logEntry("FATAL - Unable to read plugin config. Exiting.");
     exit(1);
 }
-$GLOBALS['cfg'] = $cfg; // make accessible inside functions via $GLOBALS['cfg']
-$GLOBALS['verboseLogging'] = $cfg['verboseLogging'];
 
 logEntry("Server URL: " . $cfg['serverUrl']);
 logEntry("Remote Playlist: " . $cfg['remotePlaylist']);
 logEntry("Interrupt Schedule: " . ($cfg['interruptSchedule'] ? 'yes' : 'no'));
 logEntry("Request Fetch Time: " . $cfg['requestFetchTime'] . "s");
 logEntry("FPP Status Check Time: " . $cfg['fppStatusCheckTime'] . "s");
-
-// ============================================================
-// Register the configured ShowPilot URL with FPP's Content Security
-// Policy whitelist.
-// ============================================================
-// FPP's Apache config has a strict CSP that blocks the plugin UI from
-// making fetch() calls to non-whitelisted origins. Without this, the
-// browser console fills with "Refused to connect" errors on the very
-// first Sync attempt — a confusing first-run experience.
-//
-// /opt/fpp/scripts/ManageApacheContentPolicy.sh maintains a
-// per-directive whitelist file that Apache reads on each request.
-// Adding our origin once is idempotent (no harm in re-adding).
-//
-// We do this at listener startup rather than on settings save because
-// (a) there's no save hook in the plugin save flow, and (b) running
-// it at startup means a listener restart (which users already do via
-// the plugin UI) re-registers any newly-changed URL.
-function registerCspOrigin($url) {
-    if (empty($url)) return;
-    $script = '/opt/fpp/scripts/ManageApacheContentPolicy.sh';
-    if (!file_exists($script)) {
-        logEntry("CSP register skipped - $script not found (older FPP?)");
-        return;
-    }
-    $parsed = parse_url($url);
-    if (!$parsed || empty($parsed['scheme']) || empty($parsed['host'])) {
-        logEntry("CSP register skipped - cannot parse origin from URL: $url");
-        return;
-    }
-    // Build origin: scheme + host + optional port. CSP whitelist entries
-    // are origin-only (no path). Default ports (80 for http, 443 for https)
-    // can be implied by the scheme but we explicitly include any non-default
-    // port for clarity.
-    $origin = $parsed['scheme'] . '://' . $parsed['host'];
-    if (!empty($parsed['port'])) {
-        $origin .= ':' . $parsed['port'];
-    }
-    // escapeshellarg to defend against any weirdness in the URL even
-    // though we already validated parse_url. Belt-and-suspenders.
-    $cmd = $script . ' add connect-src ' . escapeshellarg($origin) . ' 2>&1';
-    $output = array();
-    $exitCode = 0;
-    exec($cmd, $output, $exitCode);
-    if ($exitCode === 0) {
-        logEntry("CSP register OK: connect-src $origin");
-    } else {
-        logEntry("CSP register FAILED ($exitCode): " . implode(' | ', $output));
-    }
-    // Apache picks up CSP changes from the regenerated config file
-    // automatically (no restart required for the connect-src list).
-}
-registerCspOrigin($cfg['serverUrl']);
 
 if (empty($cfg['serverUrl']) || empty($cfg['showToken'])) {
     logEntry("WARNING - Server URL or Show Token is empty. Plugin will idle until configured.");
@@ -225,45 +104,31 @@ if (empty($cfg['serverUrl']) || empty($cfg['showToken'])) {
 // API helpers
 // ============================================================
 
+// Returns the decoded JSON body of a 2xx response, or null.
 function ofHttp($method, $path, $body = null) {
     global $cfg;
 
-    if (empty($cfg['serverUrl']) || empty($cfg['showToken'])) {
+    $r = sp_http($cfg['serverUrl'], $cfg['showToken'], $method, $path,
+        $body === null ? null : json_encode($body));
+    if ($r === null) return null;
+
+    if ($r['body'] === null) {
+        logEntry_verbose("ERROR - Request to $path failed");
+        return null;
+    }
+    if ($r['status'] >= 300 && $r['status'] < 400) {
+        logEntry("ERROR - ShowPilot server redirected $path (HTTP " . $r['status']
+            . "). Enter the server's final URL (e.g. https://) as the Server URL.");
+        return null;
+    }
+    if ($r['status'] < 200 || $r['status'] >= 300) {
+        logEntry_verbose("ERROR - $path returned HTTP " . $r['status']);
         return null;
     }
 
-    $url = $cfg['serverUrl'] . $path;
-    $headers = array(
-        "Authorization: Bearer " . $cfg['showToken'],
-        "Accept: application/json",
-    );
-    if ($body !== null) {
-        $headers[] = "Content-Type: application/json";
-    }
-
-    $options = array(
-        'http' => array(
-            'method'        => $method,
-            'timeout'       => 10,
-            'header'        => implode("\r\n", $headers),
-            'ignore_errors' => true,
-        ),
-    );
-    if ($body !== null) {
-        $options['http']['content'] = json_encode($body);
-    }
-
-    $context = stream_context_create($options);
-    $result = @file_get_contents($url, false, $context);
-
-    if ($result === false) {
-        logEntry_verbose("ERROR - Request to $url failed");
-        return null;
-    }
-
-    $decoded = json_decode($result);
+    $decoded = json_decode($r['body']);
     if ($decoded === null && json_last_error() !== JSON_ERROR_NONE) {
-        logEntry("ERROR - Invalid JSON from $url: " . json_last_error_msg());
+        logEntry("ERROR - Invalid JSON from $path: " . json_last_error_msg());
         return null;
     }
     return $decoded;
@@ -335,17 +200,11 @@ function ofSyncSequences($playlistName) {
 function readFppPlaylistSequences($playlistName) {
     if (empty($playlistName)) return null;
 
-    $playlistPath = "/home/fpp/media/playlists/" . $playlistName . ".json";
-    if (!file_exists($playlistPath)) {
-        logEntry("Playlist file not found: $playlistPath");
+    $data = sp_read_playlist($playlistName);
+    if ($data === null) {
+        logEntry("Playlist not found or unreadable: $playlistName");
         return null;
     }
-
-    $json = @file_get_contents($playlistPath);
-    if ($json === false) return null;
-
-    $data = json_decode($json, true);
-    if (!is_array($data)) return null;
 
     // FPP playlists have a `mainPlaylist` array. Each entry is a sequence or media item.
     $items = isset($data['mainPlaylist']) ? $data['mainPlaylist'] : array();
@@ -415,10 +274,6 @@ function prettifyName($name) {
     $name = preg_replace('/\s+/', ' ', $name);
     return trim($name);
 }
-
-// ============================================================
-// FPP helpers
-// ============================================================
 
 // ============================================================
 // Cooldown enforcement (v0.14.0+)
@@ -494,13 +349,15 @@ function pruneExpiredCooldowns() {
     return $changed;
 }
 
-// Apply playlistPatches from /state. Patches are stdClass objects from ofHttp.
+// Apply playlistPatches from /state. Patches are stdClass objects from ofHttp;
+// anything that isn't a well-formed patch is ignored.
 function recordCooldownPatches($patches) {
     global $activeCooldowns;
     if (!is_array($patches)) return;
     $changed = false;
     foreach ($patches as $patch) {
-        $name = isset($patch->sequenceName) ? $patch->sequenceName : '';
+        if (!is_object($patch)) continue;
+        $name = isset($patch->sequenceName) && is_string($patch->sequenceName) ? $patch->sequenceName : '';
         if ($name === '') continue;
         $enabled = !empty($patch->enabled);
         if ($enabled) {
@@ -511,7 +368,7 @@ function recordCooldownPatches($patches) {
             }
             continue;
         }
-        $until = isset($patch->reenableAt) ? strtotime($patch->reenableAt) : false;
+        $until = isset($patch->reenableAt) && is_string($patch->reenableAt) ? strtotime($patch->reenableAt) : false;
         if ($until === false || $until <= time()) continue;
         if (!isset($activeCooldowns[$name]) || $activeCooldowns[$name] !== $until) {
             if (!isset($activeCooldowns[$name])) logEntry("[cooldown] '$name' in cooldown until " . date('c', $until));
@@ -531,12 +388,13 @@ function migrateLegacyCooldowns() {
     if (is_array($state) && !empty($state['cooldowns']) && is_array($state['cooldowns'])) {
         $snapshots = isset($state['snapshot']) && is_array($state['snapshot']) ? $state['snapshot'] : array();
         foreach ($state['cooldowns'] as $name => $entry) {
-            $playlist = isset($entry['playlist']) ? $entry['playlist'] : '';
-            if ($playlist !== '' && isset($snapshots[$playlist])) {
-                legacyRestoreEntry($name, $playlist, $snapshots[$playlist]);
+            if (!is_array($entry)) continue;
+            $playlist = isset($entry['playlist']) && is_string($entry['playlist']) ? $entry['playlist'] : '';
+            if ($playlist !== '' && isset($snapshots[$playlist]) && is_array($snapshots[$playlist])) {
+                legacyRestoreEntry((string)$name, $playlist, $snapshots[$playlist]);
             }
-            $until = isset($entry['reenableAt']) ? strtotime($entry['reenableAt']) : false;
-            if ($until !== false && $until > time()) $activeCooldowns[$name] = $until;
+            $until = isset($entry['reenableAt']) && is_string($entry['reenableAt']) ? strtotime($entry['reenableAt']) : false;
+            if ($until !== false && $until > time()) $activeCooldowns[(string)$name] = $until;
         }
     }
     @unlink($legacyCooldownFile);
@@ -544,28 +402,26 @@ function migrateLegacyCooldowns() {
 }
 
 function legacyRestoreEntry($name, $playlist, $snapshot) {
-    $path = '/home/fpp/media/playlists/' . $playlist . '.json';
-    if (!file_exists($path)) return;
-    $data = json_decode(@file_get_contents($path), true);
-    if (!is_array($data) || !isset($data['mainPlaylist'])) return;
+    // sp_read_playlist/sp_write_playlist reject names that would escape
+    // FPP's playlist directory.
+    $data = sp_read_playlist($playlist);
+    if ($data === null || !isset($data['mainPlaylist']) || !is_array($data['mainPlaylist'])) return;
 
     $fileOf = function ($item) {
         $f = isset($item['sequenceName']) ? $item['sequenceName']
            : (isset($item['mediaName']) ? $item['mediaName'] : '');
-        return pathinfo($f, PATHINFO_FILENAME);
+        return pathinfo((string)$f, PATHINFO_FILENAME);
     };
     foreach ($data['mainPlaylist'] as $item) {
         if ($fileOf($item) === $name) return;   // already present
     }
     foreach ($snapshot as $idx => $item) {
         if ($fileOf($item) !== $name) continue;
-        $at = min($idx, count($data['mainPlaylist']));
+        $at = min((int)$idx, count($data['mainPlaylist']));
         array_splice($data['mainPlaylist'], $at, 0, array($item));
-        $tmp = $path . '.tmp';
-        if (@file_put_contents($tmp, json_encode($data, JSON_PRETTY_PRINT)) !== false && @rename($tmp, $path)) {
+        if (sp_write_playlist($playlist, $data)) {
             logEntry("[cooldown] Restored '$name' to playlist '$playlist' at index $at (legacy repair)");
         } else {
-            @unlink($tmp);
             logEntry("[cooldown] ERROR: could not restore '$name' to playlist '$playlist'");
         }
         return;
@@ -585,11 +441,7 @@ function legacyRestoreEntry($name, $playlist, $snapshot) {
 // we own entirely.
 // ============================================================
 
-$queuePlaylistName = 'ShowPilot Queue';
-
-function getQueuePlaylistPath() {
-    return '/home/fpp/media/playlists/ShowPilot Queue.json';
-}
+const QUEUE_PLAYLIST = 'ShowPilot Queue';
 
 // Rebuild the ShowPilot Queue playlist file from the current $pendingQueue.
 // Returns true on success. The playlist contains exactly the pending songs
@@ -599,15 +451,12 @@ function rebuildQueuePlaylist($pendingQueue) {
 
     // We need the full entry objects from the remote playlist to write
     // a valid FPP playlist. Read the remote playlist to get entry metadata.
-    $remotePath = '/home/fpp/media/playlists/' . basename($GLOBALS['cfg']['remotePlaylist']) . '.json';
-    if (!file_exists($remotePath)) {
-        logEntry("[queue] Remote playlist file not found: $remotePath");
+    $remoteName = $GLOBALS['cfg']['remotePlaylist'];
+    $remoteData = sp_read_playlist($remoteName);
+    if ($remoteData === null || !isset($remoteData['mainPlaylist'])) {
+        logEntry("[queue] Remote playlist not found or unreadable: $remoteName");
         return false;
     }
-    $json = @file_get_contents($remotePath);
-    if ($json === false) return false;
-    $remoteData = json_decode($json, true);
-    if (!is_array($remoteData) || !isset($remoteData['mainPlaylist'])) return false;
 
     // Build a lookup: index (1-based) => entry object
     $byIndex = array();
@@ -629,7 +478,7 @@ function rebuildQueuePlaylist($pendingQueue) {
     if (empty($entries)) return false;
 
     $playlist = array(
-        'name'         => 'ShowPilot Queue',
+        'name'         => QUEUE_PLAYLIST,
         'mainPlaylist' => $entries,
         'leadIn'       => array(),
         'leadOut'      => array(),
@@ -638,16 +487,8 @@ function rebuildQueuePlaylist($pendingQueue) {
         'description'  => 'Managed by ShowPilot plugin — do not edit manually',
     );
 
-    $path = getQueuePlaylistPath();
-    $tmp  = $path . '.tmp';
-    $written = @file_put_contents($tmp, json_encode($playlist, JSON_PRETTY_PRINT));
-    if ($written === false) {
+    if (!sp_write_playlist(QUEUE_PLAYLIST, $playlist)) {
         logEntry("[queue] ERROR: could not write queue playlist");
-        return false;
-    }
-    if (!@rename($tmp, $path)) {
-        logEntry("[queue] ERROR: could not rename queue playlist");
-        @unlink($tmp);
         return false;
     }
     logEntry_verbose("[queue] Rebuilt queue playlist with " . count($entries) . " songs");
@@ -704,28 +545,23 @@ function getNextScheduledSequence($fppStatus, $currentlyPlaying, $remotePlaylist
     // Don't overwrite what ShowPilot already knows in that case.
     if ($currentPlaylist === $remotePlaylist) return "";
 
-    // Read the playlist file and find the item after the currently playing sequence
-    $playlistPath = "/home/fpp/media/playlists/" . $currentPlaylist . ".json";
-    if (!file_exists($playlistPath)) return "";
+    // Find the item after the currently playing sequence
+    $data = sp_read_playlist($currentPlaylist);
+    if ($data === null || !isset($data['mainPlaylist']) || !is_array($data['mainPlaylist'])) return "";
 
-    $json = @file_get_contents($playlistPath);
-    $data = @json_decode($json);
-    if (!$data || !isset($data->mainPlaylist) || !is_array($data->mainPlaylist)) return "";
-
-    $items = $data->mainPlaylist;
+    $items = array_values($data['mainPlaylist']);
     $count = count($items);
     for ($i = 0; $i < $count; $i++) {
-        if (!isset($items[$i]->sequenceName)) continue;
-        $itemName = pathinfo($items[$i]->sequenceName, PATHINFO_FILENAME);
+        if (!isset($items[$i]['sequenceName'])) continue;
+        $itemName = pathinfo($items[$i]['sequenceName'], PATHINFO_FILENAME);
         if ($itemName === $currentlyPlaying) {
             // Wrap to start if at end
-            $nextIdx = ($i + 1) >= $count ? 0 : ($i + 1);
-            $nextItem = $items[$nextIdx];
-            if (isset($nextItem->sequenceName)) {
-                return pathinfo($nextItem->sequenceName, PATHINFO_FILENAME);
+            $nextItem = $items[($i + 1) % $count];
+            if (isset($nextItem['sequenceName'])) {
+                return pathinfo($nextItem['sequenceName'], PATHINFO_FILENAME);
             }
-            if (isset($nextItem->mediaName)) {
-                return pathinfo($nextItem->mediaName, PATHINFO_FILENAME);
+            if (isset($nextItem['mediaName'])) {
+                return pathinfo($nextItem['mediaName'], PATHINFO_FILENAME);
             }
             return "";
         }
@@ -739,9 +575,7 @@ function getNextScheduledSequence($fppStatus, $currentlyPlaying, $remotePlaylist
 
 $lastPlayingReported = "";
 $lastNextReported = "";
-$lastQueuedForSequence = "";
 $lastQueuedAt = 0;
-$lastInsertedSequence = "";   // (legacy; kept for compat — no longer drives logic)
 $lastWasRemote = false;       // Tracks previous loop's $playingFromRemote value
 // Pending queue: array of ['name' => sequenceName, 'idx' => playlistIndex]
 // Tracks songs handed to FPP that haven't played yet. Used to rebuild the
@@ -767,32 +601,31 @@ saveActiveCooldowns();
 
 while (true) {
     // Refresh settings each loop — allows the FPP UI to change things live
-    $s = parse_ini_file($pluginConfigFile);
-    if ($s === false) {
+    $s = sp_read_config();
+    if (empty($s)) {
         logEntry("ERROR - Unable to read plugin config. Retrying in 5s.");
         sleep(5);
         continue;
     }
 
-    $enabled = smartDecode($s['listenerEnabled']) === 'true';
-    $restarting = smartDecode($s['listenerRestarting']) === 'true';
+    $enabled = sp_setting($s, 'listenerEnabled') === 'true';
+    $restarting = sp_setting($s, 'listenerRestarting') === 'true';
 
     // The Remote Playlist dropdown saves immediately and Sync Now uses the new
     // value, so the listener must follow it live too. Holding the startup value
     // until a restart meant inserting positions from the new playlist into the
     // old one (e.g. a Halloween vote playing a Christmas song).
-    $livePlaylist = isset($s['remotePlaylist']) ? smartDecode($s['remotePlaylist']) : '';
+    $livePlaylist = sp_setting($s, 'remotePlaylist');
     if ($livePlaylist !== $cfg['remotePlaylist']) {
         logEntry("Remote Playlist changed: '" . $cfg['remotePlaylist'] . "' -> '$livePlaylist'");
         $cfg['remotePlaylist'] = $livePlaylist;
     }
 
     if ($restarting) {
-        WriteSettingToFile("listenerEnabled", urlencode("true"), $pluginName);
-        WriteSettingToFile("listenerRestarting", urlencode("false"), $pluginName);
+        WriteSettingToFile("listenerEnabled", urlencode("true"), SP_SETTINGS_KEY);
+        WriteSettingToFile("listenerRestarting", urlencode("false"), SP_SETTINGS_KEY);
         logEntry("Restarting ShowPilot Plugin v" . $PLUGIN_VERSION);
-        $cfg = loadRuntimeSettings();
-        $GLOBALS['verboseLogging'] = $cfg['verboseLogging'];
+        $cfg = loadRuntimeSettings() ?? $cfg;
         logEntry("Server URL: " . $cfg['serverUrl']);
     }
 
@@ -826,12 +659,8 @@ while (true) {
             ofReportNext('');
             $lastPlayingReported = '';
             $lastNextReported = '';
-            $lastInsertedSequence = '';
-            $lastImmediateAt = 0;
-            $pendingRequests = array();
             $pendingQueue = array();
             $sequencesClearedWhenIdle = true;
-            $lastQueuedForSequence = '';
             $lastQueuedAt = 0;
             $lastWasRemote = false;
             logEntry_verbose("FPP idle. Cleared sequences on server.");
@@ -842,6 +671,9 @@ while (true) {
 
     $sequencesClearedWhenIdle = false;
     $currentlyPlaying = getSequenceName($fppStatus);
+
+    $currentPlaylistNow = isset($fppStatus->current_playlist->playlist)
+        ? $fppStatus->current_playlist->playlist : '';
 
     // Only report changes
     if ($currentlyPlaying !== '' && $currentlyPlaying !== $lastPlayingReported) {
@@ -886,7 +718,7 @@ while (true) {
             $currentPlaylistNow2 = isset($fppStatus->current_playlist->playlist)
                 ? $fppStatus->current_playlist->playlist : '';
             $playingFromRemote = ($currentPlaylistNow2 === $cfg['remotePlaylist']);
-            $playingFromQueue  = ($currentPlaylistNow2 === 'ShowPilot Queue');
+            $playingFromQueue  = ($currentPlaylistNow2 === QUEUE_PLAYLIST);
             if (!$playingFromRemote && !$playingFromQueue && !empty($pendingQueue)) {
                 logEntry_verbose("Schedule resumed; clearing pending queue");
                 $pendingQueue = array();
@@ -997,10 +829,11 @@ while (true) {
     }
 
     // After inserting, hold briefly to avoid duplicate fetches within
-    // the same second (loop runs every 1s, HTTP round trip takes ~100ms)
+    // the same second (loop runs every 1s, HTTP round trip takes ~100ms).
+    // "Additional Wait Time" in the UI extends this hold.
     if ($shouldCheck && $lastQueuedAt > 0) {
         $sinceQueue = time() - $lastQueuedAt;
-        if ($sinceQueue < 2) {
+        if ($sinceQueue < 2 + $cfg['additionalWaitTime']) {
             $shouldCheck = false;
             logEntry_verbose("Post-insert hold ({$sinceQueue}s), skipping");
         }
@@ -1095,7 +928,7 @@ while (true) {
                             : (!$cfg['interruptSchedule'] ? "non-interrupt mode"
                             : "request queued");
                         logEntry("Queuing ($reason): $nextSeq added ($queueCount songs total in queue)");
-                        insertPlaylistAfterCurrent('ShowPilot Queue', 1, $queueCount);
+                        insertPlaylistAfterCurrent(QUEUE_PLAYLIST, 1, $queueCount);
                     } else {
                         // Fallback: single-song insert into remote playlist
                         $reason = $isVotingMode ? "voting mode" : "request queued";
@@ -1106,20 +939,15 @@ while (true) {
                     logEntry_verbose("'$nextSeq' already in pending queue, skipping");
                 }
 
-                        } elseif ($nextSeq !== null && $nextIdx === null) {
-                logEntry("WARN - Got sequence '$nextSeq' but no playlist index. Sync playlist first?");
-                // Mark as checked so we don't spam
-                $lastQueuedForSequence = $currentlyPlaying;
+            } elseif (!$effectiveInterrupt) {
+                // No winner/request. Hold off briefly so we don't re-poll
+                // the same song end on every tick. (A sequence with no index
+                // can't reach here: the resolve step above clears both.)
                 $lastQueuedAt = time();
-            } else {
-                // No winner/request. Mark checked to prevent re-polling the same song.
-                if (!$effectiveInterrupt) {
-                    $lastQueuedForSequence = $currentlyPlaying;
-                    $lastQueuedAt = time();
-                }
             }
         }
     }
+
 
     // Expire cooldowns promptly even when $shouldCheck is false or ShowPilot
     // is unreachable. The C++ hook also ignores expired entries on its own,
@@ -1128,7 +956,7 @@ while (true) {
         saveActiveCooldowns();
     }
     // Keep the hook's exclude list in sync with the configured request pool.
-    setCooldownExclude(array($cfg['remotePlaylist'], $queuePlaylistName));
+    setCooldownExclude(array($cfg['remotePlaylist'], QUEUE_PLAYLIST));
 
     usleep($cfg['fppStatusCheckTime'] * 1000000);
 }
