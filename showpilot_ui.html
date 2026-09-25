@@ -1,1088 +1,285 @@
 <?php
-// ShowPilot plugin config UI — renders inside FPP's plugin config area
+// ShowPilot plugin config UI — renders inside FPP's plugin config area.
+// FPP include_once()s this file from www/plugin.php, so __DIR__ is the
+// plugin's real install directory.
 $skipJSsettings = true;
-include_once "/opt/fpp/www/config.php";
-include_once "/opt/fpp/www/common.php";
-$pluginName = "showpilot";
-$pluginConfigFile = $settings['configDirectory'] . "/plugin." . $pluginName;
-$pluginSettings = @parse_ini_file($pluginConfigFile) ?: array();
-
-// The actual on-disk install directory FPP cloned this plugin into — driven
-// by pluginInfo.json's repoName, NOT the same thing as $pluginName above
-// (that's a fixed settings-file key; this is whatever the directory is
-// really named). Every fetch() call in this page's own JS hits
-// plugin.php?plugin=<dir>&page=..., so it has to know the real directory —
-// hardcoding it here was the second place fpp-data#209's v0.13.72 repoName
-// change broke (the first two: every script's hardcoded PLUGIN_DIR, fixed
-// in v0.13.74, and content_menu.inc's own menu link, fixed in v0.13.75).
-// FPP includes this very file via `include_once $pluginDirectory . "/" .
-// $pluginName . "/" . $pageName` (www/plugin.php), so __DIR__ here is
-// already this plugin's real install directory.
-$pluginDirName = basename(__DIR__);
-
-// Plugin version is defined in version.php — DO NOT hardcode here.
-// See that file for the centralization rationale.
+require_once __DIR__ . '/showpilot_common.php';
 require_once __DIR__ . '/version.php';
+
+$pluginName = SP_SETTINGS_KEY;
+$pluginDirName = SP_REPO_NAME;
 $pluginVersion = $PLUGIN_VERSION;
 
-// Helper for safe display of saved values. Plugin config values may be
-// stored URL-encoded (when saved through FPP's API or showpilot_config.php)
-// or plain (when saved through the configfile fallback / Developer raw
-// editor). Decode only when we see %XX patterns; otherwise leave as-is so
-// plain values containing '+' don't get mangled into spaces by urldecode.
+// Also moves a token an older version left in config/ into plugindata/.
+$hasShowToken = sp_get_show_token() !== '';
+$pluginSettings = sp_read_config();
+
 function val($settings, $key, $default = '') {
-    $v = $settings[$key] ?? $default;
-    if ($v === '' || $v === null) return $v;
-    return preg_match('/%[0-9a-fA-F]{2}/', $v) ? urldecode($v) : $v;
+    return sp_setting($settings, $key, $default);
 }
 
-// Determine if listener is running
-$listenerRunning = false;
-$ps = @shell_exec("pgrep -f showpilot_listener.php");
-if (!empty(trim((string)$ps))) {
-    $listenerRunning = true;
+$listenerRunning = trim((string)@shell_exec("pgrep -f showpilot_listener.php")) !== '';
+
+// The saved token is never sent to the browser. When one exists the field
+// shows this placeholder value, which saveShowToken() ignores.
+const SP_TOKEN_MASK = '••••••••••••';
+
+// One settings row: label + help on the left, control on the right.
+function spRowStart($label, $for, $help) {
+    echo '<div class="row g-2 py-3 border-bottom">';
+    echo '<div class="col-md-5">';
+    echo '<label class="form-label fw-semibold mb-1"' . ($for ? ' for="' . $for . '"' : '') . '>' . $label . '</label>';
+    echo '<div class="form-text mt-0">' . $help . '</div>';
+    echo '</div><div class="col-md-7">';
+}
+function spRowEnd() {
+    echo '</div></div>';
+}
+function spInputAttrs($pluginName, $key, $expr) {
+    return 'onchange="SetPluginSetting(\'' . $pluginName . '\',\'' . $key . '\',encodeURIComponent(' . $expr . '));"';
 }
 ?>
 
-<style>
-  /* ============================================================
-     ShowPilot Plugin Config — Stage Lights theme (matches admin)
-     Scoped to .of-page so we don't fight FPP's own styles.
-     Tracks light/dark via prefers-color-scheme.
-     ============================================================ */
-  /* Paint the FPP body background to match our theme. Without this,
-     FPP's white body shows through above and below our .of-page (and
-     occasionally on the sides) — the full-bleed trick on .of-page
-     itself only handles areas inside the viewport, not FPP's chrome
-     padding around its content area. Setting body bg directly is the
-     simplest way to make every visible white area disappear.
-     Scoped to when our .of-page is on the page so we don't affect
-     other FPP screens. */
-  body:has(.of-page:not(.theme-light):not(.theme-auto-light)) {
-    background: #0a1428 !important;
-  }
-
-  body:has(.of-page.theme-light),
-  body:has(.of-page.theme-auto-light) {
-    background: #f5f7fb !important;
-  }
-
-  .of-page {
-    /* Default: dark Stage Lights */
-    --of-bg: #0a1428;
-    --of-bg-elevated: #14233f;
-    --of-bg-input: #0d1b35;
-    --of-border: #1e3050;
-    --of-border-hover: #2c4773;
-    --of-text: #e8eef7;
-    --of-text-muted: #8b9bb4;
-    --of-text-dim: #5a6a85;
-    --of-accent: #ef4444;
-    --of-accent-hover: #dc2626;
-    --of-accent-text: #ffffff;
-    --of-success: #4ade80;
-    --of-success-soft: rgba(74, 222, 128, 0.15);
-    --of-success-border: rgba(74, 222, 128, 0.4);
-    --of-danger: #ef4444;
-    --of-danger-soft: rgba(239, 68, 68, 0.15);
-    --of-danger-border: rgba(239, 68, 68, 0.4);
-    --of-link: #60a5fa;
-
-    --of-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-    --of-radius: 10px;
-    --of-pill: 999px;
-
-    /* Body background is painted directly (see above) to cover all
-       FPP chrome padding. We just need to set ourselves up with normal
-       padding so the card sits comfortably in the content area. */
-    background: var(--of-bg);
-    min-height: 100vh;
-    box-sizing: border-box;
-
-    color: var(--of-text);
-    font-family: 'Inter', system-ui, -apple-system, Segoe UI, sans-serif;
-  }
-
-  /* Elevated card that holds the form contents — like PulseMesh's panel */
-  .of-card {
-    background: var(--of-bg-elevated);
-    border: 1px solid var(--of-border);
-    border-radius: var(--of-radius);
-    padding: 1.5rem 1.75rem;
-    box-shadow: var(--of-shadow);
-  }
-
-  .of-card-header {
-    margin-bottom: 1.5rem;
-  }
-
-  .of-card-header h1 {
-    margin: 0;
-    font-size: 1.4rem;
-    font-weight: 700;
-    color: var(--of-text);
-    display: flex;
-    align-items: baseline;
-    gap: 0.5rem;
-  }
-
-  .of-back-link {
-    display: inline-block;
-    margin-bottom: 0.75rem;
-    color: var(--of-text-muted);
-    text-decoration: none;
-    font-size: 0.85rem;
-    font-weight: 500;
-    padding: 0.3rem 0.75rem;
-    border-radius: var(--of-pill);
-    border: 1px solid var(--of-border);
-    background: var(--of-bg-input);
-    transition: all 0.15s;
-  }
-
-  .of-back-link:hover {
-    color: var(--of-text);
-    border-color: var(--of-border-hover);
-    background: var(--of-bg);
-  }
-
-  .of-card-subtitle {
-    margin-top: 0.3rem;
-    font-size: 0.85rem;
-    color: var(--of-text-muted);
-  }
-
-  .of-version {
-    background: var(--of-bg-input);
-    padding: 0.1rem 0.5rem;
-    border-radius: var(--of-pill);
-    border: 1px solid var(--of-border);
-    color: var(--of-text-dim);
-    font-size: 0.78rem;
-    font-weight: 500;
-  }
-
-  /* Light theme — applied via .theme-light class on .of-page (toggleable),
-     with prefers-color-scheme auto-fallback for users who never toggle. */
-  .of-page.theme-light,
-  .of-page.theme-auto-light {
-    --of-bg: #f5f7fb;
-    --of-bg-elevated: #ffffff;
-    --of-bg-input: #ffffff;
-    --of-border: #d8dfeb;
-    --of-border-hover: #b0bbcd;
-    --of-text: #1a2c4f;
-    --of-text-muted: #5a6a85;
-    --of-text-dim: #8b9bb4;
-    --of-accent: #dc2626;
-    --of-accent-hover: #b91c1c;
-    --of-success: #16a34a;
-    --of-success-soft: rgba(22, 163, 74, 0.10);
-    --of-success-border: rgba(22, 163, 74, 0.30);
-    --of-danger: #dc2626;
-    --of-danger-soft: rgba(220, 38, 38, 0.08);
-    --of-danger-border: rgba(220, 38, 38, 0.30);
-    --of-link: #2563eb;
-    --of-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
-  }
-
-  /* Theme toggle button — top-right of card header, like admin */
-  .of-card-header {
-    position: relative;
-  }
-
-  .of-theme-toggle {
-    position: absolute;
-    top: 0;
-    right: 0;
-    background: transparent;
-    border: 1px solid var(--of-border);
-    color: var(--of-text-muted);
-    padding: 0.35rem 0.6rem;
-    border-radius: var(--of-pill);
-    font-size: 0.95rem;
-    cursor: pointer;
-    line-height: 1;
-    transition: all 0.15s;
-  }
-
-  .of-theme-toggle:hover {
-    color: var(--of-text);
-    border-color: var(--of-border-hover);
-    background: var(--of-bg-input);
-  }
-
-  .of-page h2 {
-    font-size: 1.05rem;
-    font-weight: 600;
-    color: var(--of-accent);
-    margin: 2rem 0 0.5rem;
-    text-align: center;
-    letter-spacing: 0.02em;
-  }
-
-  .of-banner {
-    padding: 1rem 1.25rem;
-    border-radius: var(--of-radius);
-    text-align: center;
-    font-weight: 600;
-    font-size: 1rem;
-    margin-bottom: 1.5rem;
-    border: 1px solid;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
-  }
-
-  .of-banner.running {
-    background: var(--of-success-soft);
-    color: var(--of-success);
-    border-color: var(--of-success-border);
-  }
-
-  .of-banner.stopped {
-    background: var(--of-danger-soft);
-    color: var(--of-danger);
-    border-color: var(--of-danger-border);
-  }
-
-  .of-banner::before {
-    content: "";
-    width: 0.6rem;
-    height: 0.6rem;
-    border-radius: 50%;
-    background: currentColor;
-    box-shadow: 0 0 8px currentColor;
-  }
-
-  .of-section-header {
-    text-align: center;
-    padding-top: 0.5rem;
-  }
-
-  .of-section-header h2 {
-    display: inline-block;
-    margin: 0;
-  }
-
-  .of-section-header .of-section-sub {
-    display: block;
-    font-size: 0.85rem;
-    color: var(--of-text-muted);
-    font-weight: 400;
-    margin-top: 0.25rem;
-  }
-
-  /* Plugin page tabs */
-  .of-tabs {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.25rem;
-    border-bottom: 1px solid var(--of-border);
-    margin: 1.25rem 0 0.5rem;
-    padding: 0;
-  }
-
-  .of-tab-btn {
-    background: transparent;
-    border: 0;
-    padding: 0.6rem 1rem;
-    color: var(--of-text-muted);
-    font-size: 0.9rem;
-    font-weight: 500;
-    cursor: pointer;
-    border-radius: 6px 6px 0 0;
-    border-bottom: 2px solid transparent;
-    transition: all 0.15s;
-    font-family: inherit;
-    margin-bottom: -1px;
-  }
-
-  .of-tab-btn:hover {
-    color: var(--of-text);
-    background: var(--of-bg-input);
-  }
-
-  .of-tab-btn.active {
-    color: var(--of-accent);
-    border-bottom-color: var(--of-accent);
-    font-weight: 600;
-  }
-
-  .of-tab-pane {
-    display: none;
-  }
-
-  .of-tab-pane.active {
-    display: block;
-  }
-
-  /* Hide tab section headers since the tab itself indicates the section */
-  .of-tab-pane>.of-section-header:first-child {
-    display: none;
-  }
-
-  .of-row {
-    display: grid;
-    grid-template-columns: 1fr 1.4fr;
-    gap: 1.25rem;
-    padding: 1.1rem 0;
-    border-bottom: 1px solid var(--of-border);
-    align-items: start;
-  }
-
-  .of-row:last-child {
-    border-bottom: none;
-  }
-
-  .of-row .of-label {
-    font-weight: 600;
-    font-size: 0.95rem;
-    color: var(--of-text);
-  }
-
-  .of-row .of-help {
-    color: var(--of-text-muted);
-    font-size: 0.85rem;
-    line-height: 1.5;
-    margin-top: 0.3rem;
-  }
-
-  .of-row .of-help code {
-    background: var(--of-bg-elevated);
-    color: var(--of-text);
-    padding: 0.1rem 0.4rem;
-    border-radius: 4px;
-    font-size: 0.85em;
-    border: 1px solid var(--of-border);
-    font-family: ui-monospace, Menlo, Consolas, monospace;
-  }
-
-  .of-row .of-help.warn {
-    color: var(--of-accent);
-    font-weight: 600;
-  }
-
-  .of-row .of-control {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-  }
-
-  .of-input,
-  .of-select,
-  .of-textarea {
-    width: 100%;
-    padding: 0.6rem 0.75rem;
-    border: 1px solid var(--of-border);
-    border-radius: 6px;
-    font-size: 0.95rem;
-    font-family: inherit;
-    background: var(--of-bg-input);
-    color: var(--of-text);
-    transition: border-color 0.15s, box-shadow 0.15s;
-  }
-
-  .of-input:focus,
-  .of-select:focus,
-  .of-textarea:focus {
-    outline: none;
-    border-color: var(--of-accent);
-    box-shadow: 0 0 0 3px var(--of-danger-soft);
-  }
-
-  .of-input::placeholder {
-    color: var(--of-text-dim);
-  }
-
-  .of-textarea {
-    min-height: 200px;
-    font-family: ui-monospace, Menlo, Consolas, monospace;
-    font-size: 0.85rem;
-    line-height: 1.5;
-  }
-
-  /* Toggle switch — themed accent + neutral track */
-  .of-toggle {
-    position: relative;
-    display: inline-block;
-    width: 52px;
-    height: 28px;
-    cursor: pointer;
-  }
-
-  .of-toggle input {
-    opacity: 0;
-    width: 0;
-    height: 0;
-  }
-
-  .of-toggle-slider {
-    position: absolute;
-    inset: 0;
-    background: var(--of-border);
-    border-radius: 28px;
-    transition: 0.2s;
-    display: flex;
-    align-items: center;
-    padding: 0 7px;
-    color: var(--of-text-muted);
-    font-size: 12px;
-    font-weight: bold;
-  }
-
-  .of-toggle-slider::before {
-    content: "OFF";
-    margin-left: auto;
-    font-size: 9px;
-    letter-spacing: 0.05em;
-  }
-
-  .of-toggle-slider::after {
-    content: "";
-    position: absolute;
-    height: 20px;
-    width: 20px;
-    left: 4px;
-    bottom: 4px;
-    background: white;
-    border-radius: 50%;
-    transition: 0.2s;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-  }
-
-  .of-toggle input:checked+.of-toggle-slider {
-    background: var(--of-accent);
-    color: white;
-  }
-
-  .of-toggle input:checked+.of-toggle-slider::before {
-    content: "ON";
-    margin-left: 0;
-    margin-right: auto;
-    font-size: 9px;
-    letter-spacing: 0.05em;
-  }
-
-  .of-toggle input:checked+.of-toggle-slider::after {
-    transform: translateX(24px);
-  }
-
-  .of-btn {
-    display: inline-block;
-    padding: 0.5rem 1rem;
-    border-radius: var(--of-pill);
-    font-size: 0.9rem;
-    font-weight: 600;
-    cursor: pointer;
-    border: 1px solid;
-    background: transparent;
-    transition: all 0.15s;
-    text-decoration: none;
-    font-family: inherit;
-  }
-
-  .of-btn-primary {
-    color: var(--of-accent);
-    border-color: var(--of-accent);
-  }
-
-  .of-btn-primary:hover {
-    background: var(--of-accent);
-    color: var(--of-accent-text);
-  }
-
-  .of-btn-success {
-    color: var(--of-success);
-    border-color: var(--of-success);
-  }
-
-  .of-btn-success:hover {
-    background: var(--of-success);
-    color: var(--of-bg);
-  }
-
-  .of-btn-danger {
-    color: var(--of-danger);
-    border-color: var(--of-danger);
-  }
-
-  .of-btn-danger:hover {
-    background: var(--of-danger);
-    color: white;
-  }
-
-  .of-btn-neutral {
-    color: var(--of-text);
-    border-color: var(--of-border-hover);
-  }
-
-  .of-btn-neutral:hover {
-    background: var(--of-bg-elevated);
-    border-color: var(--of-text-muted);
-  }
-
-  .of-btn-group {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    align-items: center;
-  }
-
-  .of-status {
-    font-size: 0.85rem;
-  }
-
-  .of-status.success {
-    color: var(--of-success);
-    font-weight: 600;
-  }
-
-  .of-status.error {
-    color: var(--of-danger);
-    font-weight: 600;
-  }
-
-  .of-status.muted {
-    color: var(--of-text-muted);
-  }
-
-  .of-log-output {
-    background: var(--of-bg-input);
-    color: var(--of-text);
-    border: 1px solid var(--of-border);
-    border-radius: var(--of-radius);
-    padding: 1rem;
-    font-family: ui-monospace, Menlo, Consolas, monospace;
-    font-size: 0.78rem;
-    white-space: pre-wrap;
-    word-break: break-all;
-    max-height: 320px;
-    overflow-y: auto;
-    line-height: 1.5;
-  }
-
-  .of-log-output:empty::before {
-    content: "Click \"Tail Log\" to load recent log lines.";
-    color: var(--of-text-dim);
-    font-style: italic;
-  }
-
-  .of-page-footer {
-    text-align: center;
-    font-size: 0.85rem;
-    color: var(--of-text-muted);
-    margin-top: 2rem;
-    padding-top: 1.25rem;
-    border-top: 1px solid var(--of-border);
-  }
-
-  .of-page-footer a {
-    color: var(--of-link);
-    text-decoration: none;
-  }
-
-  .of-page-footer a:hover {
-    text-decoration: underline;
-  }
-
-  @media (max-width: 720px) {
-    .of-row {
-      grid-template-columns: 1fr;
-      gap: 0.5rem;
-    }
-
-    .of-page {
-      padding: 1rem 0.75rem;
-    }
-  }
-</style>
-
-<div class="of-page">
-  <div class="of-card">
-
-    <div class="of-card-header">
-      <button type="button" class="of-theme-toggle" id="ofThemeToggle" onclick="toggleOfTheme()"
-        title="Toggle light/dark">◐</button>
-      <a href="/" class="of-back-link" title="Return to FPP main page">&larr; Back to FPP</a>
-      <h1>ShowPilot Plugin Configuration</h1>
-      <div class="of-card-subtitle">Manage your connection, playlist, and listener &middot; <span class="of-version">v
-          <?php echo htmlspecialchars($pluginVersion); ?>
-        </span></div>
+<div id="showpilotPlugin" class="container-fluid px-0">
+
+  <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-3">
+    <h2 class="mb-0">ShowPilot <small class="fs-6 text-body-secondary">v<?php echo htmlspecialchars($pluginVersion); ?></small></h2>
+    <span id="listenerBanner" class="badge <?php echo $listenerRunning ? 'text-bg-success' : 'text-bg-danger'; ?>">
+      <?php echo $listenerRunning ? 'Listener running' : 'Listener stopped'; ?>
+    </span>
+  </div>
+
+  <ul class="nav nav-pills pageContent-tabs flex-wrap row-gap-2 mb-3" role="tablist">
+    <?php foreach (array('server' => 'Server', 'playlist' => 'Playlist', 'behavior' => 'Behavior',
+        'listener' => 'Listener', 'audio' => 'Audio', 'diagnostics' => 'Diagnostics', 'developer' => 'Developer') as $tab => $label): ?>
+      <li class="nav-item" role="presentation">
+        <button type="button" class="nav-link<?php echo $tab === 'server' ? ' active' : ''; ?>" role="tab"
+          data-tab="<?php echo $tab; ?>" onclick="ofSwitchTab('<?php echo $tab; ?>')"><?php echo $label; ?></button>
+      </li>
+    <?php endforeach; ?>
+  </ul>
+
+  <!-- ========== Server ========== -->
+  <div class="sp-pane" data-tab-pane="server">
+    <div class="alert alert-warning d-flex flex-wrap align-items-center justify-content-between gap-2">
+      <div>Changes to <em>Server URL</em> or <em>Show Token</em> take effect after the listener restarts.</div>
+      <div class="d-flex align-items-center gap-2">
+        <button type="button" class="btn btn-primary btn-sm" onclick="restartListener();">Restart Listener</button>
+        <span id="restartStatusServer" class="small"></span>
+      </div>
     </div>
 
-    <!-- ============================================ -->
-    <!-- LISTENER STATUS BANNER                       -->
-    <!-- ============================================ -->
-    <div id="listenerBanner" class="of-banner <?php echo $listenerRunning ? 'running' : 'stopped'; ?>">
-      <?php echo $listenerRunning ? 'ShowPilot Listener is Running' : 'ShowPilot Listener is Stopped'; ?>
-    </div>
+    <?php spRowStart('Server URL', 'serverUrl',
+      'Where your self-hosted ShowPilot server is reachable, e.g. <code>http://192.168.1.230:3100</code> or
+       <code>https://lights.yourdomain.com</code>. No trailing slash. Use <code>https://</code> for any server
+       outside your home network — the show token is sent with every request.'); ?>
+      <input type="text" class="form-control" id="serverUrl" autocomplete="off"
+        value="<?php echo htmlspecialchars(val($pluginSettings, 'serverUrl')); ?>"
+        <?php echo spInputAttrs($pluginName, 'serverUrl', 'this.value'); ?> />
+    <?php spRowEnd(); ?>
 
-    <!-- Tab navigation -->
-    <div class="of-tabs" role="tablist">
-      <button type="button" class="of-tab-btn active" data-tab="server" onclick="ofSwitchTab('server')">Server</button>
-      <button type="button" class="of-tab-btn" data-tab="playlist" onclick="ofSwitchTab('playlist')">Playlist</button>
-      <button type="button" class="of-tab-btn" data-tab="behavior" onclick="ofSwitchTab('behavior')">Behavior</button>
-      <button type="button" class="of-tab-btn" data-tab="listener" onclick="ofSwitchTab('listener')">Listener</button>
-      <button type="button" class="of-tab-btn" data-tab="audio" onclick="ofSwitchTab('audio')">Audio</button>
-      <button type="button" class="of-tab-btn" data-tab="diagnostics"
-        onclick="ofSwitchTab('diagnostics')">Diagnostics</button>
-      <button type="button" class="of-tab-btn" data-tab="developer"
-        onclick="ofSwitchTab('developer')">Developer</button>
-    </div>
-
-    <!-- ============================================ -->
-    <!-- TAB: SERVER CONNECTION                       -->
-    <!-- ============================================ -->
-    <div class="of-tab-pane active" data-tab-pane="server">
-      <div class="of-section-header">
-        <h2>Server Connection</h2>
+    <?php spRowStart('Show Token', 'showToken',
+      'Copy this from your ShowPilot admin dashboard ("Show Token (for ShowPilot Plugin)" section).
+       It is stored on this FPP, readable only by the plugin, and is not shown again after saving.'); ?>
+      <input type="password" class="form-control" id="showToken" autocomplete="new-password"
+        value="<?php echo $hasShowToken ? SP_TOKEN_MASK : ''; ?>"
+        placeholder="Paste your show token"
+        onfocus="this.select();" onchange="saveShowToken(this);" />
+      <div id="showTokenStatus" class="small mt-1 <?php echo $hasShowToken ? 'text-body-secondary' : ''; ?>">
+        <?php echo $hasShowToken ? 'A token is saved. Paste a new one to replace it.' : ''; ?>
       </div>
+    <?php spRowEnd(); ?>
+  </div>
 
-      <div class="of-help warn"
-        style="margin: 0 0 1rem; padding: 0.75rem 0.85rem; border-left: 3px solid var(--of-accent); background: rgba(248, 123, 2, 0.08); border-radius: 4px; display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; justify-content: space-between;">
-        <div style="flex: 1; min-width: 280px;">
-          <strong>Heads up:</strong> Changes to <em>Server URL</em> or <em>Show Token</em> only take effect after the
-          listener restarts.
-        </div>
-        <div style="display: flex; align-items: center; gap: 0.5rem;">
-          <button type="button" class="of-btn of-btn-primary" onclick="restartListener();"
-            style="white-space: nowrap;">Restart Listener</button>
-          <span id="restartStatusServer" class="of-status muted"></span>
-        </div>
-      </div>
-
-      <div class="of-row">
-        <div>
-          <div class="of-label">Server URL</div>
-          <div class="of-help">
-            Where your self-hosted ShowPilot server is reachable.
-            e.g. <code>http://192.168.1.230:3100</code> or <code>https://lights.yourdomain.com</code>.
-            No trailing slash.
-          </div>
-        </div>
-        <div class="of-control">
-          <input type="text" class="of-input" id="serverUrl"
-            value="<?php echo htmlspecialchars(val($pluginSettings, 'serverUrl')); ?>"
-            onchange="SetPluginSetting('<?php echo $pluginName; ?>','serverUrl',encodeURIComponent(this.value));" />
-        </div>
-      </div>
-
-      <div class="of-row">
-        <div>
-          <div class="of-label">Show Token</div>
-          <div class="of-help">
-            Copy this from your ShowPilot admin dashboard
-            ("Show Token (for ShowPilot Plugin)" section).
-          </div>
-        </div>
-        <div class="of-control">
-          <input type="text" class="of-input" id="showToken"
-            value="<?php echo htmlspecialchars(val($pluginSettings, 'showToken')); ?>"
-            onchange="SetPluginSetting('<?php echo $pluginName; ?>','showToken',encodeURIComponent(this.value));" />
-        </div>
-      </div>
-
-    </div><!-- /tab: server -->
-
-    <!-- ============================================ -->
-    <!-- TAB: PLAYLIST SETUP                          -->
-    <!-- ============================================ -->
-    <div class="of-tab-pane" data-tab-pane="playlist">
-      <div class="of-section-header">
-        <h2>Playlist Setup</h2>
-      </div>
-
-      <div class="of-row">
-        <div>
-          <div class="of-label">Remote Playlist</div>
-          <div class="of-help">
-            The FPP playlist that contains the pool of sequences your viewers can vote for or request.
-          </div>
-        </div>
-        <div class="of-control">
-          <select class="of-select" id="remotePlaylist"
-            onchange="SetPluginSetting('<?php echo $pluginName; ?>','remotePlaylist',encodeURIComponent(this.value));">
-            <option value="">-- Select a playlist --</option>
-            <?php
+  <!-- ========== Playlist ========== -->
+  <div class="sp-pane d-none" data-tab-pane="playlist">
+    <?php spRowStart('Remote Playlist', 'remotePlaylist',
+      'The FPP playlist that contains the pool of sequences your viewers can vote for or request.'); ?>
+      <select class="form-select" id="remotePlaylist" <?php echo spInputAttrs($pluginName, 'remotePlaylist', 'this.value'); ?>>
+        <option value="">-- Select a playlist --</option>
+        <?php
         $currentPlaylist = val($pluginSettings, 'remotePlaylist');
-        $playlists = @scandir($settings['playlistDirectory']);
-        if ($playlists) {
-            foreach ($playlists as $pl) {
-                if (substr($pl, -5) !== '.json') continue;
-                $name = basename($pl, '.json');
-                $selected = ($name === $currentPlaylist) ? 'selected' : '';
-                echo '<option value="' . htmlspecialchars($name) . '" ' . $selected . '>'
-                   . htmlspecialchars($name) . '</option>';
-            }
+        foreach ((array)@scandir($settings['playlistDirectory']) as $pl) {
+            if (substr($pl, -5) !== '.json') continue;
+            $name = basename($pl, '.json');
+            echo '<option value="' . htmlspecialchars($name) . '"' . ($name === $currentPlaylist ? ' selected' : '') . '>'
+               . htmlspecialchars($name) . '</option>';
         }
         ?>
-          </select>
-        </div>
+      </select>
+    <?php spRowEnd(); ?>
+
+    <?php spRowStart('Sync Sequences with ShowPilot', '',
+      'Reads the selected playlist and pushes its sequences to ShowPilot. Run this whenever you add or remove
+       sequences from the playlist.'); ?>
+      <div class="d-flex flex-wrap align-items-center gap-2">
+        <button type="button" class="btn btn-primary" id="syncNowBtn" onclick="syncPlaylist();">Sync Now</button>
+        <span id="syncStatus" class="small"></span>
       </div>
-
-      <div class="of-row">
-        <div>
-          <div class="of-label">Sync Sequences with ShowPilot</div>
-          <div class="of-help">
-            Reads the selected playlist and pushes its sequences to ShowPilot.
-            Run this whenever you add or remove sequences from the playlist.
-          </div>
-        </div>
-        <div class="of-control">
-          <div class="of-btn-group">
-            <button type="button" class="of-btn of-btn-primary" id="syncNowBtn" onclick="syncPlaylist();">Sync Now</button>
-            <span id="syncStatus" class="of-status muted"></span>
-          </div>
-          <label
-            style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.6rem; font-size: 0.88rem; color: var(--of-text-muted); cursor: pointer;">
-            <input type="checkbox" id="syncMetadataCheckbox" checked style="cursor: pointer;">
-            Read MP3 tags during sync (slower, but uses real song titles &amp; artists)
-          </label>
-          <label
-            style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem; font-size: 0.88rem; color: var(--of-text-muted); cursor: pointer;">
-            <input type="checkbox" id="syncAudioCheckbox" checked style="cursor: pointer;">
-            Upload audio files to ShowPilot (recommended &mdash; serves audio from ShowPilot instead of FPP, much faster
-            &amp; scales to many viewers)
-          </label>
-        </div>
+      <div class="form-check d-flex align-items-center gap-2 ps-0 mt-3 mb-2">
+        <input class="form-check-input float-none flex-shrink-0 m-0" type="checkbox" id="syncMetadataCheckbox" checked>
+        <label class="form-check-label mb-0" for="syncMetadataCheckbox">Read MP3 tags during sync (slower, but uses real song titles &amp; artists)</label>
       </div>
-
-    </div><!-- /tab: playlist -->
-
-    <!-- ============================================ -->
-    <!-- TAB: BEHAVIOR                                -->
-    <!-- ============================================ -->
-    <div class="of-tab-pane" data-tab-pane="behavior">
-      <div class="of-section-header">
-        <h2>Behavior</h2>
+      <div class="form-check d-flex align-items-center gap-2 ps-0 mb-0">
+        <input class="form-check-input float-none flex-shrink-0 m-0" type="checkbox" id="syncAudioCheckbox" checked>
+        <label class="form-check-label mb-0" for="syncAudioCheckbox">Upload audio files to ShowPilot (recommended — ShowPilot serves
+          the audio instead of FPP, which is much faster and scales to many viewers)</label>
       </div>
+    <?php spRowEnd(); ?>
+  </div>
 
-      <div class="of-row">
-        <div>
-          <div class="of-label">Interrupt Schedule</div>
-          <div class="of-help">
-            Determines if a request or vote will interrupt the normal schedule.
-            Required if your remote playlist is a separate "pool" of viewer-controllable songs
-            (rather than the playlist that's currently playing).
-          </div>
-        </div>
-        <div class="of-control">
-          <label class="of-toggle">
-            <input type="checkbox" id="interruptSchedule" <?php echo (val($pluginSettings, 'interruptSchedule'
-              )==='true' ) ? 'checked' : '' ; ?>
-            onchange="SetPluginSetting('<?php echo $pluginName; ?>','interruptSchedule',encodeURIComponent(this.checked ? 'true' : 'false'));" />
-            <span class="of-toggle-slider"></span>
-          </label>
-        </div>
+  <!-- ========== Behavior ========== -->
+  <div class="sp-pane d-none" data-tab-pane="behavior">
+    <?php spRowStart('Interrupt Schedule', 'interruptSchedule',
+      'Whether a request or vote interrupts the normal schedule. Required if your remote playlist is a separate
+       "pool" of viewer-controllable songs rather than the playlist that is currently playing.'); ?>
+      <div class="form-check form-switch ps-0 mb-0">
+        <input class="form-check-input sp-switch float-none m-0" type="checkbox" role="switch" id="interruptSchedule"
+          <?php echo val($pluginSettings, 'interruptSchedule') === 'true' ? 'checked' : ''; ?>
+          <?php echo spInputAttrs($pluginName, 'interruptSchedule', "this.checked ? 'true' : 'false'"); ?> />
       </div>
+    <?php spRowEnd(); ?>
 
-      <div class="of-row">
-        <div>
-          <div class="of-label">Request/Vote Fetch Time</div>
-          <div class="of-help">
-            Number of seconds before the end of the current sequence to fetch the next vote winner / jukebox request.
-            Default: <code>3</code>. Range: 1–5.
-          </div>
-        </div>
-        <div class="of-control">
-          <input type="number" class="of-input" id="requestFetchTime" min="1" max="5"
-            value="<?php echo htmlspecialchars(val($pluginSettings, 'requestFetchTime', '3')); ?>"
-            onchange="SetPluginSetting('<?php echo $pluginName; ?>','requestFetchTime',encodeURIComponent(this.value));" />
-        </div>
+    <?php spRowStart('Request/Vote Fetch Time', 'requestFetchTime',
+      'Seconds before the end of the current sequence to fetch the next vote winner or jukebox request.
+       Default: <code>3</code>. Range: 1–5.'); ?>
+      <input type="number" class="form-control sp-narrow" id="requestFetchTime" min="1" max="5"
+        value="<?php echo htmlspecialchars(val($pluginSettings, 'requestFetchTime', '3')); ?>"
+        <?php echo spInputAttrs($pluginName, 'requestFetchTime', 'this.value'); ?> />
+    <?php spRowEnd(); ?>
+
+    <?php spRowStart('Additional Wait Time', 'additionalWaitTime',
+      'Extra seconds to wait after queuing a sequence before checking for the next one. Helpful if requests
+       get skipped or duplicated. Default: <code>0</code>.'); ?>
+      <input type="number" class="form-control sp-narrow" id="additionalWaitTime" min="0" max="10"
+        value="<?php echo htmlspecialchars(val($pluginSettings, 'additionalWaitTime', '0')); ?>"
+        <?php echo spInputAttrs($pluginName, 'additionalWaitTime', 'this.value'); ?> />
+    <?php spRowEnd(); ?>
+
+    <?php spRowStart('FPP Status Check Time', 'fppStatusCheckTime',
+      'How often, in seconds, the plugin polls FPP\'s status API. Lower is more responsive but uses more CPU.
+       Default: <code>1</code>.'); ?>
+      <input type="number" class="form-control sp-narrow" id="fppStatusCheckTime" min="1" max="5"
+        value="<?php echo htmlspecialchars(val($pluginSettings, 'fppStatusCheckTime', '1')); ?>"
+        <?php echo spInputAttrs($pluginName, 'fppStatusCheckTime', 'this.value'); ?> />
+    <?php spRowEnd(); ?>
+  </div>
+
+  <!-- ========== Listener ========== -->
+  <div class="sp-pane d-none" data-tab-pane="listener">
+    <?php spRowStart('Restart Listener', '',
+      'Reloads the plugin config and restarts the polling loop. Run this after changing config values on the
+       Developer tab.'); ?>
+      <div class="d-flex flex-wrap align-items-center gap-2">
+        <button type="button" class="btn btn-primary" onclick="restartListener();">Restart Listener</button>
+        <span id="restartStatus" class="small"></span>
       </div>
+    <?php spRowEnd(); ?>
 
-      <div class="of-row">
-        <div>
-          <div class="of-label">Additional Wait Time</div>
-          <div class="of-help">
-            Extra seconds to wait after queuing a sequence before checking for the next one.
-            Helpful if you're seeing requests get skipped or duplicated.
-            Default: <code>0</code>.
-          </div>
-        </div>
-        <div class="of-control">
-          <input type="number" class="of-input" id="additionalWaitTime" min="0" max="10"
-            value="<?php echo htmlspecialchars(val($pluginSettings, 'additionalWaitTime', '0')); ?>"
-            onchange="SetPluginSetting('<?php echo $pluginName; ?>','additionalWaitTime',encodeURIComponent(this.value));" />
-        </div>
+    <?php spRowStart('Stop Listener', '',
+      '<span class="text-danger">Stops the plugin entirely: no requests or votes are fetched and no playback
+       state is reported to ShowPilot.</span>'); ?>
+      <div class="d-flex flex-wrap align-items-center gap-2">
+        <button type="button" class="btn btn-danger" onclick="stopListener();">Stop Listener</button>
+        <span id="stopStatus" class="small"></span>
       </div>
+    <?php spRowEnd(); ?>
+  </div>
 
-      <div class="of-row">
-        <div>
-          <div class="of-label">FPP Status Check Time</div>
-          <div class="of-help">
-            How often the plugin polls FPP's status API.
-            Lower = more responsive, higher CPU. Default: <code>1</code> (second).
-          </div>
-        </div>
-        <div class="of-control">
-          <input type="number" class="of-input" id="fppStatusCheckTime" min="1" max="5"
-            value="<?php echo htmlspecialchars(val($pluginSettings, 'fppStatusCheckTime', '1')); ?>"
-            onchange="SetPluginSetting('<?php echo $pluginName; ?>','fppStatusCheckTime',encodeURIComponent(this.value));" />
-        </div>
+  <!-- ========== Audio ========== -->
+  <div class="sp-pane d-none" data-tab-pane="audio">
+    <p class="text-body-secondary">
+      The audio daemon runs on this FPP and shares the playing song and its exact position with your ShowPilot
+      server, which relays them to every listener's phone so they stay in sync with your speakers. It only starts
+      once a Server URL is saved, and it listens on your local network without a login — don't forward its port
+      to the internet.
+    </p>
+
+    <?php spRowStart('Daemon status', '', 'Whether the audio daemon is running on this FPP.'); ?>
+      <div class="d-flex flex-wrap align-items-center gap-2">
+        <span id="audioDaemonStatus" class="small text-body-secondary">Checking…</span>
+        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="checkAudioDaemon()">Refresh</button>
       </div>
+    <?php spRowEnd(); ?>
 
-    </div><!-- /tab: behavior -->
+    <?php spRowStart('Daemon port', 'audioDaemonPort',
+      'Port the audio daemon listens on. Default is 8090. Must match the "Daemon port" setting in your
+       ShowPilot admin panel → Settings → Audio.'); ?>
+      <input type="number" class="form-control sp-narrow" id="audioDaemonPort" min="1024" max="65535"
+        value="<?php echo htmlspecialchars(val($pluginSettings, 'audioDaemonPort', '8090')); ?>"
+        <?php echo spInputAttrs($pluginName, 'audioDaemonPort', 'this.value'); ?> />
+    <?php spRowEnd(); ?>
+  </div>
 
-    <!-- ============================================ -->
-    <!-- TAB: LISTENER CONTROL                        -->
-    <!-- ============================================ -->
-    <div class="of-tab-pane" data-tab-pane="listener">
-      <div class="of-section-header">
-        <h2>Listener Control</h2>
+  <!-- ========== Diagnostics ========== -->
+  <div class="sp-pane d-none" data-tab-pane="diagnostics">
+    <?php spRowStart('Test Connectivity', '',
+      'Pings the ShowPilot server with the Show Token to check that the server is reachable and the token is correct.'); ?>
+      <div class="d-flex flex-wrap align-items-center gap-2">
+        <button type="button" class="btn btn-primary" onclick="testConnectivity();">Test Connectivity</button>
+        <span id="connectivityStatus" class="small"></span>
       </div>
+    <?php spRowEnd(); ?>
 
-      <div class="of-row">
-        <div>
-          <div class="of-label">Restart Listener</div>
-          <div class="of-help">
-            Reloads the plugin config and restarts the polling loop.
-            Run this after changing config values via "Plugin Config" below.
-          </div>
-        </div>
-        <div class="of-control">
-          <div class="of-btn-group">
-            <button type="button" class="of-btn of-btn-primary" onclick="restartListener();">Restart Listener</button>
-            <span id="restartStatus" class="of-status muted"></span>
-          </div>
-        </div>
+    <?php spRowStart('Plugin Log (tail)', '',
+      'Latest lines from <code>plugin-' . htmlspecialchars($pluginDirName) . '.log</code> in FPP\'s logs folder.'); ?>
+      <div class="d-flex flex-wrap gap-2">
+        <button type="button" class="btn btn-outline-secondary" onclick="tailLog();">Tail Log (50 lines)</button>
+        <button type="button" class="btn btn-outline-secondary" onclick="toggleAutoTail();" id="autoTailBtn">Auto-Refresh: Off</button>
       </div>
+      <pre id="logOutput" class="sp-log border rounded p-2 mt-2 mb-0 small bg-body-tertiary"></pre>
+    <?php spRowEnd(); ?>
+  </div>
 
-      <div class="of-row">
-        <div>
-          <div class="of-label">Stop Listener</div>
-          <div class="of-help warn">
-            WARNING: This stops the plugin entirely. No requests/votes will be fetched and no playback state will be
-            reported to ShowPilot.
-          </div>
-        </div>
-        <div class="of-control">
-          <div class="of-btn-group">
-            <button type="button" class="of-btn of-btn-danger" onclick="stopListener();">Stop Listener</button>
-            <span id="stopStatus" class="of-status muted"></span>
-          </div>
-        </div>
+  <!-- ========== Developer ========== -->
+  <div class="sp-pane d-none" data-tab-pane="developer">
+    <?php spRowStart('Verbose Logging', 'verboseLogging',
+      'Logs every API call. Useful for debugging, but produces a lot of log output.'); ?>
+      <div class="form-check form-switch ps-0 mb-0">
+        <input class="form-check-input sp-switch float-none m-0" type="checkbox" role="switch" id="verboseLogging"
+          <?php echo val($pluginSettings, 'verboseLogging') === 'true' ? 'checked' : ''; ?>
+          <?php echo spInputAttrs($pluginName, 'verboseLogging', "this.checked ? 'true' : 'false'"); ?> />
       </div>
+    <?php spRowEnd(); ?>
 
-    </div><!-- /tab: listener -->
-
-    <!-- ============================================ -->
-    <!-- TAB: AUDIO DAEMON                            -->
-    <!-- ============================================ -->
-    <div class="of-tab-pane" data-tab-pane="audio">
-      <div class="of-section-header">
-        <h2>Audio Daemon</h2>
+    <?php spRowStart('Plugin Config (raw)', 'rawConfig',
+      '<span class="text-danger">Editing these values directly can break the plugin.</span> Load, edit, save,
+       then restart the listener. The show token is not part of this file.'); ?>
+      <textarea id="rawConfig" class="form-control font-monospace" rows="10"
+        placeholder="Click 'Load Config' to view the current config…"></textarea>
+      <div class="d-flex flex-wrap align-items-center gap-2 mt-2">
+        <button type="button" class="btn btn-outline-secondary" onclick="loadRawConfig();">Load Config</button>
+        <button type="button" class="btn btn-success" onclick="saveRawConfig();">Save Config</button>
+        <span id="rawConfigStatus" class="small"></span>
       </div>
+    <?php spRowEnd(); ?>
+  </div>
 
-      <p class="of-help">
-        ShowPilot's audio daemon runs on this FPP instance and streams the currently-playing
-        song directly to your ShowPilot server, which then serves it out to all listener
-        devices simultaneously. This gives automatic sync — all phones hear the same
-        bytes at the same moment, locked to what's coming out of your speakers.
-      </p>
-
-      <div class="of-row">
-        <div>
-          <div class="of-label">Daemon status</div>
-          <div class="of-help">Shows whether the audio daemon is running on this Pi.</div>
-        </div>
-        <div class="of-control">
-          <span id="audioDaemonStatus" class="of-status muted">Checking…</span>
-          <button type="button" class="of-btn of-btn-neutral" onclick="checkAudioDaemon()"
-            style="margin-left: 0.5rem;">Refresh</button>
-        </div>
-      </div>
-
-      <div class="of-row">
-        <div>
-          <div class="of-label">Daemon port</div>
-          <div class="of-help">
-            Port that the audio daemon listens on. Default is 8090. Must match the
-            "Daemon port" setting in your ShowPilot admin panel → Settings → Audio.
-          </div>
-        </div>
-        <div class="of-control">
-          <input type="number" class="of-input" id="audioDaemonPort" min="1024" max="65535"
-            value="<?php echo htmlspecialchars(val($pluginSettings, 'audioDaemonPort', '8090')); ?>"
-            onchange="SetPluginSetting('<?php echo $pluginName; ?>','audioDaemonPort',this.value);"
-            style="max-width: 120px;" />
-        </div>
-      </div>
-
-    </div><!-- /tab: audio -->
-
-    <!-- ============================================ -->
-    <!-- TAB: DIAGNOSTICS                             -->
-    <!-- ============================================ -->
-    <div class="of-tab-pane" data-tab-pane="diagnostics">
-      <div class="of-section-header">
-        <h2>Diagnostics</h2>
-      </div>
-
-      <div class="of-row">
-        <div>
-          <div class="of-label">Test Connectivity</div>
-          <div class="of-help">
-            Pings the ShowPilot server using the Show Token to verify that the server
-            is reachable and that the token is correct.
-          </div>
-        </div>
-        <div class="of-control">
-          <div class="of-btn-group">
-            <button type="button" class="of-btn of-btn-primary" onclick="testConnectivity();">Test Connectivity</button>
-            <span id="connectivityStatus" class="of-status muted"></span>
-          </div>
-        </div>
-      </div>
-
-      <div class="of-row">
-        <div>
-          <div class="of-label">Listener Log (tail)</div>
-          <div class="of-help">
-            Latest lines from <code>/home/fpp/media/logs/showpilot-listener.log</code>.
-            Auto-refreshes every 5 seconds while shown.
-          </div>
-        </div>
-        <div class="of-control">
-          <div class="of-btn-group">
-            <button type="button" class="of-btn of-btn-neutral" onclick="tailLog();">Tail Log (50 lines)</button>
-            <button type="button" class="of-btn of-btn-neutral" onclick="toggleAutoTail();"
-              id="autoTailBtn">Auto-Refresh: Off</button>
-          </div>
-          <pre id="logOutput" class="of-log-output"></pre>
-        </div>
-      </div>
-
-    </div><!-- /tab: diagnostics -->
-
-    <!-- ============================================ -->
-    <!-- TAB: ADVANCED / DEVELOPER                    -->
-    <!-- ============================================ -->
-    <div class="of-tab-pane" data-tab-pane="developer">
-      <div class="of-section-header">
-        <h2>Developer Settings</h2>
-        <span class="of-section-sub">Probably best to leave these alone…</span>
-      </div>
-
-      <div class="of-row">
-        <div>
-          <div class="of-label">Verbose Logging</div>
-          <div class="of-help">
-            Logs every API call. Useful for debugging.
-            <span style="color: var(--of-accent); font-weight: 600;">Will produce a lot of log output.</span>
-          </div>
-        </div>
-        <div class="of-control">
-          <label class="of-toggle">
-            <input type="checkbox" id="verboseLogging" <?php echo (val($pluginSettings, 'verboseLogging' )==='true' )
-              ? 'checked' : '' ; ?>
-            onchange="SetPluginSetting('<?php echo $pluginName; ?>','verboseLogging',encodeURIComponent(this.checked ? 'true' : 'false'));" />
-            <span class="of-toggle-slider"></span>
-          </label>
-        </div>
-      </div>
-
-      <div class="of-row">
-        <div>
-          <div class="of-label">Plugin Config (raw)</div>
-          <div class="of-help warn">
-            WARNING: Editing these values directly can break the plugin.
-            Click <em>Load Config</em> to view, edit, and <em>Save Config</em> to persist.
-            After saving, click <em>Restart Listener</em>.
-          </div>
-        </div>
-        <div class="of-control">
-          <textarea id="rawConfig" class="of-textarea"
-            placeholder="Click 'Load Config' to view current config…"></textarea>
-          <div class="of-btn-group">
-            <button type="button" class="of-btn of-btn-neutral" onclick="loadRawConfig();">Load Config</button>
-            <button type="button" class="of-btn of-btn-success" onclick="saveRawConfig();">Save Config</button>
-            <span id="rawConfigStatus" class="of-status muted"></span>
-          </div>
-        </div>
-      </div>
-
-    </div><!-- /tab: developer -->
-
-    <!-- Footer with project links — kept inside .of-card so the card's
-       background extends down to enclose them. Otherwise the link line
-       floats in the bare FPP page background, looking unfinished. -->
-    <div class="of-page-footer">
-      ShowPilot &middot; <a href="https://github.com/ShowPilotFPP/ShowPilot" target="_blank" rel="noopener">Server</a>
-      &middot;
-      <a href="https://github.com/ShowPilotFPP/ShowPilot-plugin" target="_blank" rel="noopener">Plugin source</a>
-    </div>
-
-  </div><!-- /of-card -->
+  <p class="small text-body-secondary mt-3 mb-0">
+    <a href="https://github.com/ShowPilotFPP/ShowPilot" target="_blank" rel="noopener">ShowPilot server</a> ·
+    <a href="https://github.com/ShowPilotFPP/ShowPilot-plugin" target="_blank" rel="noopener">Plugin source</a>
+  </p>
 </div>
 
+<style>
+  /* Layout only — colors come from FPP's Bootstrap theme. */
+  #showpilotPlugin .sp-narrow { max-width: 10rem; }
+  /* FPP's theme sizes switches like its checkboxes; widen the track so the knob has room to slide. */
+  #showpilotPlugin .sp-switch { width: 3.25em; cursor: pointer; }
+  #showpilotPlugin .sp-log { max-height: 20rem; overflow: auto; white-space: pre-wrap; }
+</style>
+
 <script type="text/javascript">
-  // Real install directory name, injected server-side (see the PHP block
-  // at the top of this file) — every plugin.php?plugin=... URL below must
-  // use this instead of a literal "showpilot", since that's what broke in
-  // fpp-data#209's v0.13.72 repoName change.
+  // Real install directory name — every plugin.php?plugin=... URL must use
+  // it rather than a literal "showpilot" (fpp-data#209).
   const SHOWPILOT_PLUGIN_DIR = <?php echo json_encode($pluginDirName); ?>;
+  const TOKEN_MASK = <?php echo json_encode(SP_TOKEN_MASK); ?>;
+  const SHOWPILOT_LOG_FILE = <?php echo json_encode('plugin-' . $pluginDirName . '.log'); ?>;
 
-  // ============================================================
-  // Theme toggle (persists in localStorage; falls back to OS preference)
-  // ============================================================
-  function applyOfTheme(theme) {
-    const page = document.querySelector('.of-page');
-    if (!page) return;
-    page.classList.remove('theme-light', 'theme-auto-light');
-    if (theme === 'light') page.classList.add('theme-light');
-    const btn = document.getElementById('ofThemeToggle');
-    if (btn) btn.textContent = theme === 'light' ? '☀' : '◐';
+  function pluginPageUrl(page) {
+    return '/plugin.php?_menu=content&plugin=' + encodeURIComponent(SHOWPILOT_PLUGIN_DIR)
+      + '&page=' + page + '&nopage=1';
   }
-  function toggleOfTheme() {
-    const current = localStorage.getItem('showpilot_plugin_theme') || 'dark';
-    const next = current === 'dark' ? 'light' : 'dark';
-    localStorage.setItem('showpilot_plugin_theme', next);
-    applyOfTheme(next);
-  }
-  (function initOfTheme() {
-    const saved = localStorage.getItem('showpilot_plugin_theme');
-    if (saved === 'light') {
-      applyOfTheme('light');
-    } else if (saved === 'dark') {
-      applyOfTheme('dark');
-    } else {
-      // No manual choice — defer to OS preference
-      const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
-      if (prefersLight) {
-        const page = document.querySelector('.of-page');
-        if (page) page.classList.add('theme-auto-light');
-      }
-    }
-  })();
-
-  // Set the browser tab title. FPP's plugin loader doesn't set one, so
-  // without this the tab shows the raw IP/URL — which is ugly when the
-  // user has multiple FPP-related tabs open. We do this from JS rather
-  // than a <title> tag because FPP injects this file mid-page; a <title>
-  // tag wouldn't reach the document head.
-  document.title = 'ShowPilot Plugin · FPP';
-
-  // Paint FPP's body background to match our theme. The CSS uses :has()
-  // for this too, but :has() is only ~3 years old; older browsers will
-  // miss it. JS fallback is defense-in-depth. Re-applies whenever theme
-  // changes since light/dark have different backgrounds.
-  function paintBodyBackground() {
-    const page = document.querySelector('.of-page');
-    if (!page) return;
-    const isLight = page.classList.contains('theme-light')
-      || page.classList.contains('theme-auto-light');
-    document.body.style.background = isLight ? '#f5f7fb' : '#0a1428';
-  }
-  paintBodyBackground();
-  // Wrap applyOfTheme so any theme change triggers a repaint
-  const _origApplyOfTheme = applyOfTheme;
-  applyOfTheme = function (theme) {
-    _origApplyOfTheme(theme);
-    paintBodyBackground();
-  };
 
   // ============================================================
   // ShowPilot proxy helper
@@ -1095,9 +292,7 @@ if (!empty(trim((string)$ps))) {
   // in JS for any of these calls.
   // ============================================================
   function showpilotFetch(path, options = {}) {
-    const proxyUrl = '/plugin.php?_menu=content&plugin=' + encodeURIComponent(SHOWPILOT_PLUGIN_DIR) + '&page=showpilot_proxy.php&nopage=1'
-      + '&path=' + encodeURIComponent(path);
-    return fetch(proxyUrl, options);
+    return fetch(pluginPageUrl('showpilot_proxy.php') + '&path=' + encodeURIComponent(path), options);
   }
 
   // ============================================================
@@ -1130,7 +325,7 @@ if (!empty(trim((string)$ps))) {
     let res = await fetch('/api/configfile/plugin.showpilot?' + cacheBust, { cache: 'no-store' });
     if (res.ok) return await res.text();
 
-    res = await fetch('/plugin.php?_menu=content&plugin=' + encodeURIComponent(SHOWPILOT_PLUGIN_DIR) + '&page=showpilot_config.php&nopage=1&action=raw&' + cacheBust, { cache: 'no-store' });
+    res = await fetch(pluginPageUrl('showpilot_config.php') + '&action=raw&' + cacheBust, { cache: 'no-store' });
     if (res.ok) return await res.text();
 
     throw new Error('Unable to load plugin config');
@@ -1174,7 +369,7 @@ if (!empty(trim((string)$ps))) {
     // Fallback: bypass endpoint. Sends body as form-urlencoded `content=...`
     // because showpilot_config.php parses it with parse_str().
     const fbRes = await fetch(
-      '/plugin.php?_menu=content&plugin=' + encodeURIComponent(SHOWPILOT_PLUGIN_DIR) + '&page=showpilot_config.php&nopage=1&action=raw&_showpilot_ts=' + Date.now(),
+      pluginPageUrl('showpilot_config.php') + '&action=raw&_showpilot_ts=' + Date.now(),
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -1231,11 +426,33 @@ if (!empty(trim((string)$ps))) {
     }
   }
 
+  // The token never goes through FPP's generic settings API (which would
+  // store it in config/); showpilot_config.php writes it to plugindata/.
+  async function saveShowToken(input) {
+    const token = input.value.trim();
+    if (!token || token === TOKEN_MASK) return;
+    setStatus('showTokenStatus', 'Saving…', 'muted');
+    try {
+      const res = await fetch(pluginPageUrl('showpilot_config.php'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'key=showToken&value=' + encodeURIComponent(token),
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      input.value = TOKEN_MASK;
+      setStatus('showTokenStatus', '✓ Token saved. Restart the listener to use it.', 'success');
+    } catch (err) {
+      setStatus('showTokenStatus', 'Save failed: ' + err.message, 'error');
+    }
+  }
+
+  const STATUS_CLASS = { muted: 'text-body-secondary', success: 'text-success', error: 'text-danger' };
+
   function setStatus(id, msg, kind) {
     const el = document.getElementById(id);
     if (!el) return;
     el.textContent = msg;
-    el.className = 'of-status ' + (kind || 'muted');
+    el.className = 'small ' + (STATUS_CLASS[kind] || STATUS_CLASS.muted);
   }
 
   // ============================================================
@@ -1549,9 +766,7 @@ if (!empty(trim((string)$ps))) {
 
       if (isVideo) {
         try {
-          const extractUrl = '/plugin.php?_menu=content&plugin=' + encodeURIComponent(SHOWPILOT_PLUGIN_DIR)
-            + '&page=extract_audio.php&nopage=1'
-            + '&file=' + encodeURIComponent(seq.mediaName);
+          const extractUrl = pluginPageUrl('extract_audio.php') + '&file=' + encodeURIComponent(seq.mediaName);
           const extRes = await fetch(extractUrl);
           if (extRes.status === 404) { missingFromFpp.push(seq.mediaName); continue; }
           if (!extRes.ok) {
@@ -1652,10 +867,12 @@ if (!empty(trim((string)$ps))) {
         const warningEl = document.getElementById('syncStatus');
         if (warningEl) {
           const current = warningEl.textContent;
-          warningEl.innerHTML = current
-            + '<br><span style="color: var(--of-status-warning, #f59e0b); white-space: pre-line; display: block; margin-top: 0.4rem; font-size: 0.85em;">'
-            + lines.join('\n').replace(/&/g, '&amp;').replace(/</g, '&lt;')
-            + '</span>';
+          const detail = document.createElement('span');
+          detail.className = 'd-block mt-1 text-warning-emphasis';
+          detail.style.whiteSpace = 'pre-line';
+          detail.textContent = lines.join('\n');
+          warningEl.textContent = current;
+          warningEl.appendChild(detail);
         }
       }, 200);
     }
@@ -1699,61 +916,53 @@ if (!empty(trim((string)$ps))) {
   }
 
   // ============================================================
-  // Tab switching
+  // Audio daemon status
   // ============================================================
+  function audioDaemonNotRunningMessage() {
+    const serverUrl = (document.getElementById('serverUrl')?.value || '').trim();
+    return serverUrl
+      ? 'Not running. Restart FPPD (Status/Control → Restart FPPD) to start the audio daemon; if it still '
+        + 'does not start, check the plugin log on the Diagnostics tab.'
+      : 'Not running. The audio daemon starts after you save a Server URL on the Server tab and restart FPPD.';
+  }
+
   async function checkAudioDaemon() {
     const statusEl = document.getElementById('audioDaemonStatus');
     if (!statusEl) return;
-    statusEl.textContent = 'Checking…';
-    statusEl.className = 'of-status muted';
-    const port = document.getElementById('audioDaemonPort')?.value || 8090;
+    setStatus('audioDaemonStatus', 'Checking…', 'muted');
     try {
-      // Read the daemon log file via FPP's log API — same origin, no CORS.
-      // If the last meaningful line is "listening on port" (not SIGTERM), daemon is up.
-      const res = await fetch('/api/file/Logs/showpilot-audio.log', {
+      // audio_daemon_status.php asks the daemon's /health on this FPP.
+      const res = await fetch(pluginPageUrl('audio_daemon_status.php'), {
+        cache: 'no-store',
         signal: AbortSignal.timeout(4000),
       });
-      if (!res.ok) throw new Error('log not found');
-      const text = await res.text();
-      const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-      // Walk backwards to find last significant line
-      let lastState = null;
-      for (let i = lines.length - 1; i >= 0; i--) {
-        if (lines[i].includes('listening on port')) { lastState = 'running'; break; }
-        if (lines[i].includes('SIGTERM') || lines[i].includes('shutting down')) { lastState = 'stopped'; break; }
-      }
-      if (lastState === 'running') {
-        statusEl.textContent = `✓ Running on port ${port}`;
-        statusEl.className = 'of-status success';
+      const data = res.ok ? await res.json() : null;
+      if (data && data.ok) {
+        setStatus('audioDaemonStatus', '✓ Running on port ' + data.port, 'success');
       } else {
-        statusEl.textContent = 'Not running — restart FPP or run the install script';
-        statusEl.className = 'of-status error';
+        setStatus('audioDaemonStatus', audioDaemonNotRunningMessage(), 'error');
       }
     } catch (_) {
-      statusEl.textContent = 'Not running — restart FPP or run the install script';
-      statusEl.className = 'of-status error';
+      setStatus('audioDaemonStatus', audioDaemonNotRunningMessage(), 'error');
     }
   }
 
-  // Auto-check daemon status when the Audio tab is opened
-  const _origSwitchTab = typeof ofSwitchTab === 'function' ? ofSwitchTab : null;
   function ofSwitchTab(name) {
-    document.querySelectorAll('.of-tab-btn').forEach(btn => {
+    document.querySelectorAll('#showpilotPlugin .nav-link[data-tab]').forEach(btn => {
       btn.classList.toggle('active', btn.dataset.tab === name);
     });
-    document.querySelectorAll('.of-tab-pane').forEach(pane => {
-      pane.classList.toggle('active', pane.dataset.tabPane === name);
+    document.querySelectorAll('#showpilotPlugin .sp-pane').forEach(pane => {
+      pane.classList.toggle('d-none', pane.dataset.tabPane !== name);
     });
     // Persist selection so refreshes return to same tab
     try { localStorage.setItem('showpilot_plugin_tab', name); } catch { }
-    // Auto-check daemon when audio tab is opened
-    if (name === 'audio') setTimeout(checkAudioDaemon, 300);
+    if (name === 'audio') checkAudioDaemon();
   }
   // Restore last-selected tab on load
   (function restoreTab() {
     try {
       const saved = localStorage.getItem('showpilot_plugin_tab');
-      if (saved && document.querySelector(`.of-tab-pane[data-tab-pane="${saved}"]`)) {
+      if (saved && document.querySelector(`#showpilotPlugin .sp-pane[data-tab-pane="${saved}"]`)) {
         ofSwitchTab(saved);
       }
     } catch { }
@@ -1765,20 +974,13 @@ if (!empty(trim((string)$ps))) {
   // ============================================================
   async function refreshListenerBanner() {
     try {
-      const res = await fetch('/plugin.php?_menu=content&plugin=' + encodeURIComponent(SHOWPILOT_PLUGIN_DIR) + '&page=listener_status.php&nopage=1', { cache: 'no-store' });
+      const res = await fetch(pluginPageUrl('listener_status.php'), { cache: 'no-store' });
       if (!res.ok) return;
       const data = await res.json();
       const banner = document.getElementById('listenerBanner');
       if (!banner) return;
-      if (data.running) {
-        banner.classList.remove('stopped');
-        banner.classList.add('running');
-        banner.textContent = 'ShowPilot Listener is Running';
-      } else {
-        banner.classList.remove('running');
-        banner.classList.add('stopped');
-        banner.textContent = 'ShowPilot Listener is Stopped';
-      }
+      banner.className = 'badge ' + (data.running ? 'text-bg-success' : 'text-bg-danger');
+      banner.textContent = data.running ? 'Listener running' : 'Listener stopped';
     } catch (e) { /* non-fatal */ }
   }
 
@@ -1828,7 +1030,7 @@ if (!empty(trim((string)$ps))) {
   async function tailLog() {
     const out = document.getElementById('logOutput');
     try {
-      const res = await fetch('/api/file/Logs/showpilot-listener.log?tail=50');
+      const res = await fetch('/api/file/Logs/' + encodeURIComponent(SHOWPILOT_LOG_FILE) + '?tail=50');
       if (!res.ok) {
         out.textContent = '(failed to load: HTTP ' + res.status + ')';
         return;

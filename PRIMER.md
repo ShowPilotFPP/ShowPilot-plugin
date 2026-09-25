@@ -12,8 +12,8 @@ What it does:
 - **Listener** (`showpilot_listener.php`): polls FPP's `/api/status` and pushes playback state to ShowPilot via `POST /api/plugin/state`. Reports current sequence, position, next sequence, and whether FPP is playing.
 - **Audio daemon** (`showpilot_audio.js`): a long-running Node process that listens to FPP's FIFO (`/tmp/SHOWPILOT_FIFO`) for `MediaSyncStart/Stop/Packet` events, then broadcasts `position` and `syncPoint` WebSocket events to the ShowPilot LXC for viewer audio sync.
 - **Scheduler commands** (`commands/`): PHP scripts registered with FPP's event scheduler so operators can switch ShowPilot modes, toggle viewer control on/off, and more at specific playlist positions — without touching a web UI.
-- **Admin UI** (`showpilot_ui.html`): FPP-embedded config page for setting the ShowPilot server URL and show token.
 - **Native plugin** (`src/FPPShowPilotSync.cpp` → `lib<plugin-dir>.so`, loaded by fppd): writes MultiSync media events to the FIFO for the audio daemon, and (v0.14.0+) enforces sequence cooldowns through FPP's `query_next` playlist hook — see "Cooldown enforcement" below.
+- **Admin UI** (`showpilot_ui.html`): config page rendered inside FPP's own header/navigation (`menu.inc`, `'wrap' => 1`, same as Remote Falcon), built from FPP's Bootstrap classes so it follows FPP's light/dark theme.
 
 ---
 
@@ -39,19 +39,25 @@ showpilot-plugin/                   (FPP plugin dir — named from pluginInfo.js
                                       e.g. /home/fpp/media/plugins/showpilot-plugin/. Scripts
                                       below derive this at runtime rather than hardcoding it —
                                       see the v0.13.74 changelog entry for why that matters.)
+├── showpilot_common.php           — shared PHP helpers: config, token storage, logging, ShowPilot HTTP client, playlist paths
 ├── showpilot_listener.php          — main polling loop
+├── menu.inc                        — FPP menu entry (Content Setup → ShowPilot)
 ├── showpilot_audio.js              — audio sync daemon
 ├── showpilot_ui.html               — admin config UI embedded in FPP
+├── showpilot_config.php            — per-key / raw config saves (the only path that writes the show token)
+├── showpilot_proxy.php             — same-origin proxy from the UI to the ShowPilot server (allow-listed paths)
 ├── version.php                     — single version source of truth ($PLUGIN_VERSION)
-├── pluginInfo.json                 — FPP plugin manifest (name, version, homeURL)
+├── pluginInfo.json                 — FPP plugin manifest, including the required `privacy` block
+├── package.json / package-lock.json — the audio daemon's pinned npm dependency (ws)
 ├── callbacks.sh                    — FPP lifecycle hooks
 ├── src/FPPShowPilotSync.cpp        — native fppd plugin: MultiSync FIFO writer + cooldown playlist hook
 ├── scripts/
-│   ├── postStart.sh                — starts audio daemon after FPP starts
-│   ├── preStop.sh                  — stops daemon cleanly before FPP stops
+│   ├── showpilot_env.sh            — sourced by every script: paths, start/stop helpers
+│   ├── postStart.sh                — starts listener + audio daemon after FPP starts
+│   ├── postStop.sh                 — stops them when FPP stops
 │   ├── restart-daemon.sh           — restarts daemon without a full fppd cycle
 │   ├── fpp_install.sh              — fresh install only; always requests a restart (v0.13.73+)
-│   ├── fpp_uninstall.sh            — runs on removal; always requests a restart
+│   ├── fpp_uninstall.sh            — runs on removal; keeps settings + token, removes cooldown state, requests a restart
 │   └── fpp_upgrade.sh              — runs on "Update"; tries FPP 10+ hot-reload first, only falls back to a restart if that isn't confirmed (v0.13.73+)
 └── commands/
     ├── descriptions.json           — FPP scheduler command registry
@@ -78,11 +84,7 @@ showpilot-plugin/                   (FPP plugin dir — named from pluginInfo.js
 
 ## Scheduler commands
 
-All commands in `commands/` follow the same pattern:
-1. Read plugin config from FPP's config file (`plugin.showpilot` ini file)
-2. Extract `serverUrl` and `showToken`
-3. POST to the ShowPilot API endpoint with a JSON payload
-4. Exit silently (FPP scheduler doesn't process output)
+Every command `require`s `showpilot_common.php` and is a few lines long. The viewer-mode commands call `sp_set_viewer_mode('<MODE>')`, which reads the server URL from `config/plugin.showpilot` and the token from `plugindata/`, POSTs to ShowPilot, and logs the result to the plugin log. The listener commands flip settings with FPP's `WriteSettingToFile()`.
 
 The `descriptions.json` file is FPP's registry — every command that should appear in FPP's Event Scheduler UI must have an entry here. Format:
 ```json
@@ -99,20 +101,7 @@ The `descriptions.json` file is FPP's registry — every command that should app
 
 ## Deployment
 
-The plugin is installed via FPP's Plugin Manager (paste the GitHub URL). Updates are applied via `git pull` on the FPP host inside the plugin directory, then a listener restart. The install directory's actual name is whatever `pluginInfo.json`'s `repoName` was at install time (`showpilot-plugin` as of v0.13.74) — substitute your host's real path below; every script in this plugin (as of v0.13.74) derives it at runtime instead of assuming a fixed name:
-
-```bash
-# After updating plugin files:
-cd /home/fpp/media/plugins/showpilot-plugin   # or whatever FPP actually named it
-git pull origin main
-
-# If only listener/command PHP changed:
-# (FPP picks up PHP changes on next poll cycle — no explicit restart needed
-#  unless you want to be sure)
-
-# If showpilot_audio.js changed:
-sudo ./scripts/restart-daemon.sh
-```
+The plugin is installed via FPP's Plugin Manager (paste the GitHub URL) and updated with its **Update** button, which pulls the code and runs `scripts/fpp_upgrade.sh` (rebuild, hot-reload on FPP 10+, restart listener and daemon). There is no separate deploy script — FPP's guidelines ask plugins to use FPP's own upgrade path rather than self-updating. The install directory's name is `pluginInfo.json`'s `repoName` (`showpilot-plugin`); every script derives it at runtime.
 
 **Packaging a tarball for ShipPilot:**
 ```bash
@@ -134,13 +123,30 @@ The tarball must include `.release.json` at the root:
 
 ## Audio daemon details
 
-`showpilot_audio.js` is a dependency-free Node.js process. Key behaviors:
+`showpilot_audio.js` is a Node.js 18+ process whose only dependency is `ws` (pinned in `package-lock.json`, installed with `npm ci`). Key behaviors:
 
-- Writes PID to `/tmp/showpilot-audio.pid` on startup; cleans it on exit.
+- Runs as the `fpp` user (via `setpriv`), and only starts once a Server URL is configured, since it listens on the LAN.
+- Serves only files with an audio extension, directly inside the music directory; malformed names and Range headers get a 4xx instead of crashing the process.
+- Stopped by full-path `pkill -f`; there is no PID file.
 - Broadcasts `position` events every ~500ms and `syncPoint` events every ~1s.
 - `syncPoint` suppression windows (to avoid false snaps on song change): `MediaSyncStart` → 1000ms; `MediaSyncPacket` song-change → 800ms; broadcast interval gate → 1000ms; initial forced syncPoint → 1000ms after first start.
 - HTTP poll endpoint (`GET /status`) for health checks — must NOT update `lastSyncPointAt` (only the FIFO handler controls syncPoint suppression).
 - The daemon restarts automatically after an FPP restart via `postStart.sh`. After a plugin-only update (no fppd restart), run `restart-daemon.sh` manually.
+
+---
+
+## Security & privacy conventions (v0.14.0+)
+
+These follow FPP's [plugin guidelines](https://github.com/FalconChristmas/fpp-plugin-Template/blob/master/PLUGIN_GUIDELINES.md) (§1 logging, §2 lifecycle, §14 privacy). Keep them when changing code:
+
+- **Show token lives in `<mediadir>/plugindata/<repoName>/showToken` (0600), never in `config/`.** FPP's crash bundle and JSON backups copy `config/`. `sp_get_show_token()` migrates any token found in `config/plugin.showpilot` automatically. The UI field is write-only (`type="password"`, never echoed) and saves only through `showpilot_config.php`.
+- **One log file:** `<logdir>/plugin-<repoName>.log` via `sp_log()` (PHP), `plugin_log` (shell), and `LOG_FILE` (daemon). No other logs, no `/tmp` logs, no self-rotation.
+- **Every playlist path goes through `sp_playlist_path()`**, which rejects separators and `..`. Names come from the ShowPilot server's cooldown patches and must never escape FPP's playlist directory.
+- **ShowPilot HTTP calls go through `sp_http()`**, which never follows redirects (PHP would re-send the bearer token to the redirect target). The server URL must be plain `http(s)://` with no credentials.
+- **No FPP config edits.** The CSP `connect-src` registration older versions did is gone; the UI proxies every call, so none is needed. Install, upgrade and uninstall remove the entry an older version added.
+- **Node comes from Debian's apt archive**, not NodeSource. FPP's guidelines forbid adding package sources for packages Debian already ships.
+- **`pluginInfo.json`'s `privacy` block must match the code.** If you add a recipient, listener, or system change, update it; FPP re-shows the install dialog when it changes.
+- **Cooldowns are the other developer's design (v0.14.0); see "Cooldown enforcement".** Don't reintroduce playlist-file edits. The only playlist the plugin writes is its own `ShowPilot Queue` (plus the one-time legacy repair). Playlist reads are still direct file reads through `sp_read_playlist()`; `GET /api/playlist/<name>` (what Remote Falcon uses) would be the guideline-preferred path.
 
 ---
 
@@ -151,7 +157,7 @@ The tarball must include `.release.json` at the root:
 How it works now:
 
 1. ShowPilot's `/api/plugin/state` response carries `playlistPatches` (`{sequenceName, enabled:false, reenableAt}` while cooled, `enabled:true` when cleared). The server side is unchanged.
-2. `showpilot_listener.php` (`recordCooldownPatches()`) keeps an in-memory map and writes `<media>/config/showpilot-cooldown-active.json` atomically (temp file + rename, mode 0644 so fppd can read it whatever user it runs as): `{"cooldowns": {"Name": <until epoch secs>}, "exclude": [<remotePlaylist>, "ShowPilot Queue"]}`. Expired entries are pruned every loop.
+2. `showpilot_listener.php` (`recordCooldownPatches()`) keeps an in-memory map and writes `<media>/config/showpilot-cooldown-active.json` atomically (temp file + rename, mode 0644 so fppd can read it whatever user it runs as; since v0.14.2 the listener runs as `fpp`, so the file is fpp-owned): `{"cooldowns": {"Name": <until epoch secs>}, "exclude": [<remotePlaylist>, "ShowPilot Queue"]}`. Expired entries are pruned every loop.
 3. The native plugin overrides `playlistCallback()` and acts only on `action == "query_next"`, which FPP calls synchronously when a playlist item finishes, before advancing. It acts only on the **top-level** playlist (callback name must equal `Player::INSTANCE.GetPlaylistName()`, so inserted playlists such as ShowPilot's request queue are ignored) and skips anything in `exclude`.
 4. It reads the live playlist order via `Player::INSTANCE.GetConfig()` (reflects shuffle), finds the next main-playlist item, and if that item is cooled, walks forward to the first non-cooled item.
 5. The jump runs on a **worker thread**, not inside the callback. The callback runs on fppd's playlist thread holding the playlist mutex mid-transition; FPP 10 defers a re-entrant `Play()` safely but FPP 8.x/9.x would run it inline and corrupt the transition. The worker blocks on that same mutex (`Player::GetInfo()`), confirms FPP is actually on the cooled item (`Player::GetPosition()` == expected, same playlist name), then calls `Player::INSTANCE.StartPlaylist(name, repeat, targetPos)`. With the same file, same repeat and `position >= 0`, FPP takes its "jump to index in the already-running playlist" branch in `Playlist::Play` — no reload, shuffle order and schedule entry preserved. Verified present in FPP 8.5, 9.4 and 10.x source.
@@ -165,7 +171,7 @@ Deliberate limits (do not "fix" without re-reading FPP's `Playlist.cpp`):
 
 Migration: on listener startup, `migrateLegacyCooldowns()` reads the legacy `showpilot-cooldowns.json`, restores any entries 0.13.x removed from playlists (using its snapshots), carries still-active cooldowns into the new file, then deletes the legacy file. This is the only place the plugin writes a playlist file, and only to undo the old behavior. `fpp_uninstall.sh` removes both state files.
 
-Manual test: stop the listener, write `{"cooldowns":{"<sequence name without .fseq>":<epoch secs>},"exclude":[]}` to the active file with `sudo tee` (the file is root-owned), and watch fppd's log. The listener rewrites the file from memory when it restarts, which wipes a hand-written entry.
+Manual test: stop the listener, write `{"cooldowns":{"<sequence name without .fseq>":<epoch secs>},"exclude":[]}` to the active file with `sudo tee`, and watch fppd's log. The listener rewrites the file from memory when it restarts, which wipes a hand-written entry.
 
 Log lines to look for: `[cooldown] ... in cooldown until ...` (listener log) and `ShowPilot: next item ... is in cooldown; will continue at ...` / `ShowPilot: skipped cooled ...` (fppd log, VB_PLUGIN).
 
@@ -181,14 +187,9 @@ ShowPilot v0.33.155+ introduced Race mode — a tap-to-win competitive viewer in
 
 ---
 
-## FPP plugin-manager compatibility (v0.13.66+)
+## FPP plugin-manager compatibility (v0.13.66+, menu.inc since v0.14.0)
 
-FPP's 10.x-beta Plugin Manager (July 2026) resolves each plugin's "Open" button URL by statically scanning `content_menu.inc`/`menu.inc` for a literal, quoted `page=....php` value, rather than executing the file the way FPP's nav sidebar does. Two consequences to keep in mind for any future menu link changes:
-
-- **`nopage=1` must always precede `page=...` in the href.** The scanner's regex extracts `page=` by substring, not real query parsing, and `"nopage=1"` contains the substring `"page=1"`. If it lands after the real `page=`, the scanner grabs `"1"` instead and the Open button 404s. Always write `...&nopage=1&page=...`.
-- **The page value must be a literal, static `.php` filename that exists in the plugin dir** — not a variable or a computed URL. If a future menu entry needs to point somewhere dynamic (a different host/port, etc.), route it through a small static `.php` redirect file the scanner can find, and do the dynamic computation inside that file at request time. `ShowPilot-Lite`'s `open.php` (added in Lite v0.5.47) is the reference pattern for this.
-
-If FPP's scanner logic changes again, re-check `www/api/controllers/plugin.php` in `FalconChristmas/fpp` (functions `_PluginGetBestPageUrl`, `_PluginScanMenuPagesRaw`, `_PluginExtractPageFromHtml`, `_PluginExtractPageFromRaw`) before assuming a fix still holds.
+FPP's 10.x Plugin Manager resolves each plugin's "Open" button URL by statically scanning `menu.inc` (or legacy `content_menu.inc`) for the page name, rather than executing it the way the sidebar does. Keep `menu.inc`'s `'page' => 'showpilot_ui.html'` a literal string. With `'wrap' => 1` the link carries no `nopage` parameter, so the old "`nopage=1` must precede `page=`" ordering trap from v0.13.66 no longer applies. The page's own background `fetch()` calls (proxy, config, status) still use `&nopage=1` because they return JSON, not a page.
 
 ---
 
@@ -227,6 +228,7 @@ Same as the other ShowPilot repos:
 | 0.13.76 | **The actual cause of "ShowPilot isn't getting info when the show is running," found live.** Not a network problem, not a stale process (though a genuinely orphaned listener from a manual `rm -rf` of the old `ShowPilot-plugin` directory was also cleaned up during this investigation — see the operational note below). The real bug: `showpilot_listener.php` was the **one file in the entire plugin** that computed `$pluginName` dynamically — `basename(dirname(__FILE__))` — instead of hardcoding `"showpilot"` the way every other file does (`showpilot_config.php`, `showpilot_ui.html`, every `commands/*.php`, confirmed by grepping all of them). This was invisible for the plugin's whole history because the install directory was always literally named `showpilot` — the dynamic computation and the hardcoded literal produced the same value. As of v0.13.74, the real directory is `showpilot-plugin`, so this one file alone started reading and writing `/home/fpp/media/config/plugin.showpilot-plugin` (freshly empty — no serverUrl, no showToken) and logging to `plugin-showpilot-plugin.log`, while every other part of the plugin (the config UI, the scheduler commands, the config file a user actually edits) kept using `plugin.showpilot`. `ofHttp()`'s `if (empty($cfg['serverUrl']) || empty($cfg['showToken'])) return null;` guard then made every outbound report to ShowPilot's server a silent no-op — no error logged, because the request was never attempted. Confirmed via the ShowPilot server's own admin dashboard: Connection showed Offline, Last seen over an hour ago, and Plugin version stuck reporting 0.13.73 — the last point at which the directory (and thus `$pluginName`) still happened to match. Fix: hardcoded `$pluginName = "showpilot"` in `showpilot_listener.php` to match every other file; `$pluginPath` (the one place in that file that legitimately needs the real directory, though it turned out to be unused elsewhere in the file) still derives from `basename(dirname(__FILE__))` so it stays correct if it's ever used later. **Operational note, not a code fix:** during this investigation we also found a fully orphaned `showpilot_listener.php` process still running from the old, already-deleted `/home/fpp/media/plugins/ShowPilot-plugin/` directory — a manual `rm -rf` (rather than going through FPP's Plugin Manager Uninstall, which runs `fpp_uninstall.sh` and kills the listener first) leaves any already-running process alive, invisible to `ls`, still polling FPP and still POSTing to the configured server in parallel with the correct listener. Always kill matching processes (`pkill -f showpilot_listener`) before manually deleting a plugin directory by hand. |
 | 0.14.0 | **Cooldown no longer edits FPP playlists.** Replaced on-disk playlist patching (remove cooled entry, re-insert from snapshot) with a native `query_next` playlist hook in `src/FPPShowPilotSync.cpp` that continues the running playlist past cooled items via FPP's in-playlist jump; listener now only writes `showpilot-cooldown-active.json`. One-time startup migration restores playlists left edited by 0.13.x and deletes the legacy state file; uninstall removes both state files. Prompted by an external security/standards review of the plugin. Built from FPP source reading (8.5/9.4/10.x headers compile-checked). **Live-tested:** a manually cooled mid-playlist sequence was skipped with no visible or audible start. Still to verify live: shuffled playlists, scheduler stop timing, and a cooled item directly after an inserted viewer request. See "Cooldown enforcement". |
 | 0.14.1 | **(Community PR #12.) Fix wrong song playing for a winning vote/request (e.g. a Halloween pick playing a Christmas song).** Two causes, both fixed in `showpilot_listener.php`: **(1)** The listener inserted `Remote Playlist` at the server's `playlistIndex` (the position from the last Sync Now) without checking what sits there. New `resolveRemotePlaylistIndex()` looks the winning sequence up **by name** in the live Remote Playlist file at insert time (same name/position rules as `readFppPlaylistSequences`, so it can't disagree with Sync). Stale index → logs and uses the correct position; sequence not in the playlist → logs a WARN (throttled to once per song per 60s) and skips instead of playing the wrong slot. **(2)** `remotePlaylist` was only read at startup/restart, but the UI dropdown saves immediately and Sync Now uses the new value — so changing playlists without a Restart Listener synced positions from the new playlist while inserting from the old one. The main loop now re-reads it every iteration and logs `Remote Playlist changed: ...`. |
+| 0.14.2 | **Security & privacy pass against FPP's plugin guidelines**, applied on top of 0.14.1; the 0.14.0 cooldown design is unchanged. **Secrets/privacy:** show token moved from `config/plugin.showpilot` to `plugindata/<repoName>/showToken` (0600, migrated automatically); the UI field is write-only and shows a masked value when a token is saved; added the required `privacy` block to `pluginInfo.json` and named every recipient, the LAN audio port and the files it keeps in `description`. **Security fixes:** playlist names (config, FPP status, legacy cooldown state) go through `sp_playlist_path()` so none can escape FPP's playlist directory; `sp_http()` never follows redirects, which leaked the bearer token to the redirect target; Server URL restricted to plain http(s); the audio daemon no longer crashes on a malformed Range header or `%`-escape (any LAN device could kill it with one request), serves audio extensions only, and runs as `fpp` instead of root, as does the listener; the C++ plugin and the daemon refuse a symlink or non-FIFO at `/tmp/SHOWPILOT_FIFO` (fppd runs as root), FIFO writes are serialized, and the cooldown worker's stop flag is atomic; `playlistPatches` fields are type-checked; the proxy restricts methods and upload Content-Type. **Guideline compliance:** single log `plugin-<repoName>.log` (was two, with hard-coded paths); removed the `git reset --hard` self-update from `fpp_install.sh`, the NodeSource apt source (Debian's `nodejs` instead; uninstall removes the old source), the CSP `connect-src` edit (unneeded since the UI proxies every call; install/upgrade/uninstall remove the old entry), `/tmp` PID/lock files, `npm install` inside `postStart.sh`, and `deploy.sh`; the audio daemon only starts once a Server URL is set; uninstall keeps settings and the token for reinstalls. **UI:** the config page renders inside FPP's header and navigation (`menu.inc` with `'wrap' => 1`, like Remote Falcon) using FPP's Bootstrap theme; diagnostics now read the real log and ask the daemon's `/health` (both pointed at nonexistent files). **Cleanup:** `showpilot_common.php` and `scripts/showpilot_env.sh` replace duplicated code; `ws` pinned via `package.json` + lockfile; `.gitattributes` keeps scripts LF (a CRLF `callbacks.sh` stops the C++ plugin from loading); `additionalWaitTime` is now applied. |
 
 ---
 

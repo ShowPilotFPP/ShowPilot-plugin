@@ -1,25 +1,19 @@
 <?php
-// ShowPilot config bridge. FPP's plugin-settings REST endpoints have changed
-// across versions, so this endpoint updates the plugin config file directly.
+// ShowPilot config bridge — per-key saves and the Developer tab's raw editor.
+// FPP's plugin-settings REST endpoints differ across versions, so the UI
+// falls back to this endpoint when they fail.
+//
+// The show token is never part of the config file: it is stored in
+// plugindata/ (see showpilot_common.php) and is write-only from the browser.
 header('Cache-Control: no-store');
 $skipJSsettings = true;
-include_once "/opt/fpp/www/config.php";
-
-$pluginName = "showpilot";
-$pluginConfigFile = $settings['configDirectory'] . "/plugin." . $pluginName;
+require_once __DIR__ . '/showpilot_common.php';
 
 $allowedKeys = array(
-    'serverUrl' => true,
-    'showToken' => true,
-    'remotePlaylist' => true,
-    'interruptSchedule' => true,
-    'requestFetchTime' => true,
-    'additionalWaitTime' => true,
-    'fppStatusCheckTime' => true,
-    'heartbeatIntervalSec' => true,
-    'verboseLogging' => true,
-    'listenerEnabled' => true,
-    'listenerRestarting' => true,
+    'serverUrl', 'showToken', 'remotePlaylist', 'interruptSchedule',
+    'requestFetchTime', 'additionalWaitTime', 'fppStatusCheckTime',
+    'heartbeatIntervalSec', 'verboseLogging', 'listenerEnabled',
+    'listenerRestarting', 'audioDaemonPort',
 );
 
 function respondJson($code, $payload) {
@@ -29,55 +23,29 @@ function respondJson($code, $payload) {
     exit;
 }
 
-function ensureConfigFile($path) {
-    if (!file_exists($path)) {
-        @touch($path);
+function validSetting($key, $value) {
+    switch ($key) {
+        case 'serverUrl':
+            return $value === '' || sp_is_valid_server_url(rtrim($value, '/'));
+        case 'audioDaemonPort':
+            return ctype_digit($value) && (int)$value >= 1024 && (int)$value <= 65535;
+        case 'remotePlaylist':
+            return $value === '' || sp_playlist_path($value) !== null;
+        default:
+            return true;
     }
-    // 0660, not 0666: this runs under the web server's PHP handler, which on
-    // every FPP image we support runs as the same `fpp` user as fppd/the CLI
-    // listener. Group access already covers every legitimate writer — no
-    // reason to leave a file holding the ShowPilot show token world-writable.
-    @chmod($path, 0660);
-    return file_exists($path) && is_readable($path);
-}
-
-function writePluginSetting($path, $key, $value) {
-    $encodedValue = urlencode($value);
-    $lines = file_exists($path) ? file($path, FILE_IGNORE_NEW_LINES) : array();
-    if ($lines === false) {
-        $lines = array();
-    }
-
-    $written = false;
-    for ($i = 0; $i < count($lines); $i++) {
-        if (preg_match('/^\s*' . preg_quote($key, '/') . '\s*=/', $lines[$i])) {
-            $lines[$i] = $key . ' = ' . $encodedValue;
-            $written = true;
-            break;
-        }
-    }
-
-    if (!$written) {
-        $lines[] = $key . ' = ' . $encodedValue;
-    }
-
-    $ok = @file_put_contents($path, implode("\n", $lines) . "\n");
-    @chmod($path, 0660);
-    return $ok !== false;
 }
 
 $action = $_GET['action'] ?? '';
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
+// Moves a token an older version left in config/ into plugindata/ before
+// anything below reads or rewrites the config file.
+sp_get_show_token();
+
 if ($method === 'GET' && $action === 'raw') {
-    if (!ensureConfigFile($pluginConfigFile)) {
-        http_response_code(500);
-        header('Content-Type: text/plain');
-        echo 'Could not read plugin config';
-        exit;
-    }
     header('Content-Type: text/plain');
-    echo file_get_contents($pluginConfigFile);
+    echo (string)@file_get_contents(sp_config_file());
     exit;
 }
 
@@ -85,35 +53,49 @@ if ($method !== 'POST') {
     respondJson(405, array('error' => 'Method not allowed'));
 }
 
-$body = file_get_contents('php://input');
 $params = array();
-parse_str($body, $params);
+parse_str(file_get_contents('php://input'), $params);
 
 if ($action === 'raw') {
-    $content = $params['content'] ?? '';
+    $content = (string)($params['content'] ?? '');
     if (trim($content) === '') {
         respondJson(400, array('error' => 'Empty config'));
     }
-    $ok = @file_put_contents($pluginConfigFile, $content);
-    @chmod($pluginConfigFile, 0660);
-    if ($ok === false) {
+    // A pasted showToken line is stored as the token, not written to config/.
+    $lines = preg_split('/\r?\n/', $content);
+    foreach ($lines as $i => $line) {
+        if (preg_match('/^\s*showToken\s*=\s*"?(.*?)"?\s*$/', $line, $m)) {
+            if ($m[1] !== '') sp_set_show_token(sp_smart_decode($m[1]));
+            unset($lines[$i]);
+        }
+    }
+    $path = sp_config_file();
+    if (@file_put_contents($path, rtrim(implode("\n", $lines)) . "\n", LOCK_EX) === false) {
         respondJson(500, array('error' => 'Could not write plugin config'));
     }
+    @chmod($path, 0660);
     respondJson(200, array('ok' => true));
 }
 
-$key = $params['key'] ?? '';
-$value = $params['value'] ?? '';
+$key = (string)($params['key'] ?? '');
+$value = (string)($params['value'] ?? '');
 
-if (!isset($allowedKeys[$key])) {
+if (!in_array($key, $allowedKeys, true)) {
     respondJson(400, array('error' => 'Invalid setting key'));
 }
-
-if (!ensureConfigFile($pluginConfigFile)) {
-    respondJson(500, array('error' => 'Could not create plugin config'));
+if (!validSetting($key, $value)) {
+    respondJson(400, array('error' => 'Invalid value for ' . $key));
 }
 
-if (!writePluginSetting($pluginConfigFile, $key, $value)) {
-    respondJson(500, array('error' => 'Could not write plugin config'));
+if ($key === 'showToken') {
+    $ok = sp_set_show_token($value);
+} else {
+    // Older FPP's WriteSettingToFile() returns nothing, so confirm by reading back.
+    WriteSettingToFile($key, urlencode($value), SP_SETTINGS_KEY);
+    $ok = sp_setting(sp_read_config(), $key) === $value;
+}
+
+if (!$ok) {
+    respondJson(500, array('error' => 'Could not save ' . $key));
 }
 respondJson(200, array('ok' => true));

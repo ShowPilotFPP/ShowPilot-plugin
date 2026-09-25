@@ -1,0 +1,12 @@
+{
+  "name": "showpilot-plugin",
+  "private": true,
+  "description": "Runtime dependencies for the ShowPilot FPP plugin's audio daemon",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

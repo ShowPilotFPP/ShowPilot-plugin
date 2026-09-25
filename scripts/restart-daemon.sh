@@ -1,60 +1,19 @@
 #!/bin/bash
-# ShowPilot — restart audio daemon
-# Run this after a plugin update to pick up the new showpilot_audio.js
-# without needing a full fppd restart.
-#
-# Usage: sudo <plugin-dir>/scripts/restart-daemon.sh
+# ShowPilot — restart the audio daemon in place (used by fpp_upgrade.sh).
 
-# Derived, not hardcoded (fpp-data#209 fallout — see fpp_install.sh's
-# comment for the full story). This script is always invoked by its own
-# full path (fpp_upgrade.sh), so this resolves correctly regardless of
-# what the install directory is named.
-PLUGIN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-LOG_DIR="/home/fpp/media/logs"
-# Fixed settings-file key, independent of PLUGIN_DIR — see fpp_install.sh.
-CONFIG_FILE="/home/fpp/media/config/plugin.showpilot"
-PID_FILE="/tmp/showpilot-audio.pid"
+. "$(dirname "${BASH_SOURCE[0]}")/showpilot_env.sh"
 
-# Kill existing daemon via PID file, fall back to pkill
-if [ -f "$PID_FILE" ]; then
-    OLD_PID=$(cat "$PID_FILE" 2>/dev/null)
-    if [ -n "$OLD_PID" ] && kill -0 "$OLD_PID" 2>/dev/null; then
-        echo "Stopping daemon (pid $OLD_PID)..."
-        kill "$OLD_PID" 2>/dev/null
-        sleep 0.5
-        kill -9 "$OLD_PID" 2>/dev/null || true
-    fi
-    rm -f "$PID_FILE"
-fi
-pkill -f "node $PLUGIN_DIR/showpilot_audio.js" 2>/dev/null
-sleep 1
-
-# Verify it's gone
-if pgrep -f "node $PLUGIN_DIR/showpilot_audio.js" >/dev/null 2>&1; then
-    echo "ERROR: daemon still running after kill attempt"
+ensure_runtime_files
+stop_audio_daemon
+if pgrep -f "$AUDIO_DAEMON" >/dev/null 2>&1; then
+    echo "ERROR: audio daemon still running after kill attempt"
     exit 1
 fi
 
-# Spawn new daemon
-if ! command -v node >/dev/null 2>&1; then
-    echo "ERROR: node not found"
+start_audio_daemon || exit 1
+sleep 1
+if [ -n "$(config_value serverUrl)" ] && ! pgrep -f "$AUDIO_DAEMON" >/dev/null 2>&1; then
+    echo "WARNING: audio daemon did not start — check $PLUGIN_LOG"
     exit 1
 fi
-
-AUDIO_PORT=$(grep -E '^audioDaemonPort' "$CONFIG_FILE" 2>/dev/null | cut -d'"' -f2)
-: "${AUDIO_PORT:=8090}"
-
-PORT="$AUDIO_PORT" \
-MEDIA_ROOT="/home/fpp/media/music" \
-FPP_HOST="http://127.0.0.1" \
-LOG_FILE="$LOG_DIR/plugin-showpilot-audio.log" \
-setsid /usr/bin/node --max-old-space-size=64 "$PLUGIN_DIR/showpilot_audio.js" \
-    </dev/null >>"$LOG_DIR/plugin-showpilot-audio.log" 2>&1 &
-
-sleep 1
-NEW_PID=$(cat "$PID_FILE" 2>/dev/null)
-if [ -n "$NEW_PID" ] && kill -0 "$NEW_PID" 2>/dev/null; then
-    echo "Daemon started (pid $NEW_PID)"
-else
-    echo "WARNING: daemon may not have started — check $LOG_DIR/plugin-showpilot-audio.log"
-fi
+echo "Audio daemon restarted"

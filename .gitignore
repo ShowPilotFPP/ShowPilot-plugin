@@ -15,3 +15,6 @@ plugin.showpilot
 
 # ShipPilot release manifest (never committed; defense in depth)
 .release.json
+
+# npm install output (dependencies are pinned in package-lock.json)
+node_modules/

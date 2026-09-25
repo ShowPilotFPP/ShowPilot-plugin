@@ -1,9 +1,8 @@
 #!/usr/bin/env php
 <?php
+// ShowPilot — Stop Listener. The listener sees listenerEnabled=false on its
+// next loop and exits.
 $skipJSsettings = true;
-include_once "/opt/fpp/www/config.php";
-include_once "/opt/fpp/www/common.php";
-$pluginName = "showpilot";
+require_once dirname(__DIR__) . '/showpilot_common.php';
 
-WriteSettingToFile("listenerEnabled", urlencode("false"), $pluginName);
-?>
+WriteSettingToFile("listenerEnabled", urlencode("false"), SP_SETTINGS_KEY);
