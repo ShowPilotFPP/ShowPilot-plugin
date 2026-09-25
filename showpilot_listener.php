@@ -383,6 +383,33 @@ function readFppPlaylistSequences($playlistName) {
     return $result;
 }
 
+// Resolve a sequence's position in the Remote Playlist by NAME at insert time.
+//
+// The server's playlistIndex is the position from the last Sync Now, which may
+// have been against a different playlist (e.g. synced Halloween, listener still
+// pointed at Christmas) or a since-edited one. Inserting by that number alone
+// plays whatever happens to sit at that slot. Reading the live file here uses
+// the same name/position rules as readFppPlaylistSequences, so it always lands
+// on the song that actually won.
+//
+// Returns the 1-based position, or null if the sequence isn't in the playlist.
+// If the name appears more than once, prefer the server's index when it points
+// at a matching entry; otherwise take the first match.
+function resolveRemotePlaylistIndex($playlistName, $sequenceName, $serverIdx) {
+    $items = readFppPlaylistSequences($playlistName);
+    if (!is_array($items)) return null;
+
+    $first = null;
+    foreach ($items as $item) {
+        if (strcasecmp($item['name'], $sequenceName) !== 0) continue;
+        if ($serverIdx !== null && $item['playlistIndex'] === intval($serverIdx)) {
+            return $item['playlistIndex'];
+        }
+        if ($first === null) $first = $item['playlistIndex'];
+    }
+    return $first;
+}
+
 function prettifyName($name) {
     $name = preg_replace('/[_\-]+/', ' ', $name);
     $name = preg_replace('/\s+/', ' ', $name);
@@ -820,6 +847,10 @@ $lastWasRemote = false;       // Tracks previous loop's $playingFromRemote value
 $pendingQueue = array();
 $lastHeartbeat = 0;
 $sequencesClearedWhenIdle = false;
+// Throttles the "not in Remote Playlist" warning — in interrupt mode the
+// server re-offers the same entry on every poll.
+$lastUnresolvedSeq = '';
+$lastUnresolvedAt = 0;
 
 // Mode cache for the queue-decision logic. Refreshed periodically so we
 // don't round-trip on every loop iteration just to know voting vs jukebox.
@@ -843,6 +874,16 @@ while (true) {
 
     $enabled = smartDecode($s['listenerEnabled']) === 'true';
     $restarting = smartDecode($s['listenerRestarting']) === 'true';
+
+    // The Remote Playlist dropdown saves immediately and Sync Now uses the new
+    // value, so the listener must follow it live too. Holding the startup value
+    // until a restart meant inserting positions from the new playlist into the
+    // old one (e.g. a Halloween vote playing a Christmas song).
+    $livePlaylist = isset($s['remotePlaylist']) ? smartDecode($s['remotePlaylist']) : '';
+    if ($livePlaylist !== $cfg['remotePlaylist']) {
+        logEntry("Remote Playlist changed: '" . $cfg['remotePlaylist'] . "' -> '$livePlaylist'");
+        $cfg['remotePlaylist'] = $livePlaylist;
+    }
 
     if ($restarting) {
         WriteSettingToFile("listenerEnabled", urlencode("true"), $pluginName);
@@ -1121,6 +1162,29 @@ while (true) {
                     if ($nextSeq) logEntry("Race: queuing winner $nextSeq (index $nextIdx, interrupt=" . ($raceInterrupt ? 'yes' : 'no') . ")");
                 } else {
                     logEntry_verbose("Race mode active, no winner yet");
+                }
+            }
+
+            // Never trust the server's index blindly — verify it against the
+            // Remote Playlist FPP will actually insert from (see
+            // resolveRemotePlaylistIndex). If the song isn't in that playlist,
+            // skip rather than play whatever sits at that position.
+            if ($nextSeq !== null) {
+                $resolvedIdx = resolveRemotePlaylistIndex($cfg['remotePlaylist'], $nextSeq, $nextIdx);
+                if ($resolvedIdx === null) {
+                    if ($nextSeq !== $lastUnresolvedSeq || (time() - $lastUnresolvedAt) >= 60) {
+                        logEntry("WARN - '$nextSeq' is not in Remote Playlist '" . $cfg['remotePlaylist']
+                            . "' — not inserting. Check the Remote Playlist setting, then Sync Now.");
+                        $lastUnresolvedSeq = $nextSeq;
+                        $lastUnresolvedAt = time();
+                    }
+                    $nextSeq = null;
+                    $nextIdx = null;
+                } elseif ($nextIdx === null || intval($nextIdx) !== $resolvedIdx) {
+                    logEntry("'$nextSeq': server index " . ($nextIdx === null ? 'none' : intval($nextIdx))
+                        . " is stale; using position $resolvedIdx in '" . $cfg['remotePlaylist']
+                        . "'. Run Sync Now to refresh.");
+                    $nextIdx = $resolvedIdx;
                 }
             }
 
