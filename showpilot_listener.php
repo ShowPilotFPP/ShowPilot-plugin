@@ -394,253 +394,155 @@ function prettifyName($name) {
 // ============================================================
 
 // ============================================================
-// Playlist cooldown patching (v0.13.42+)
+// Cooldown enforcement (v0.14.0+)
 //
-// When ShowPilot puts a sequence in cooldown, it sends playlistPatches
-// in the /state response. The plugin removes the sequence from FPP's
-// playlist file entirely so FPP cannot play it in normal rotation.
-// When the cooldown expires, the entry is re-inserted at its original
-// position using a per-show snapshot taken when the playlist first starts.
+// When ShowPilot puts a sequence in cooldown, it sends playlistPatches in
+// the /state response ({sequenceName, enabled:false, reenableAt}). We no
+// longer edit the operator's FPP playlist files. Instead we keep a small
+// state file listing active cooldowns, and the plugin's native C++ hook
+// (src/FPPShowPilotSync.cpp, FPP's "query_next" playlist callback) reads
+// it at each song transition and continues the playlist past any cooled
+// item. If the plugin is removed or stops, FPP plays playlists as written.
 //
-// State file layout (showpilot-cooldowns.json):
+// Active state file (showpilot-cooldown-active.json), read by fppd:
 // {
-//   "snapshot": {
-//     "MyShow": [ ...full mainPlaylist array at show start... ]
-//   },
-//   "cooldowns": {
-//     "Disney_Princesses": {
-//       "reenableAt": "2026-05-10T21:42:00Z",
-//       "playlist":   "MyShow"
-//     }
-//   }
+//   "cooldowns": { "Disney_Princesses": 1780000000 },   // until, epoch secs
+//   "exclude":   [ "<remotePlaylist>", "ShowPilot Queue" ]
 // }
 //
-// The snapshot is the source of truth for both the entry object and its
-// original index. Multiple simultaneous cooldowns are independent — each
-// re-insertion looks up its own slot in the snapshot. If the operator
-// edits the playlist mid-show, changes don't take effect until the next
-// show start, at which point a fresh snapshot is taken.
+// Legacy (<= v0.13.x) state lived in showpilot-cooldowns.json alongside
+// snapshots of playlists whose entries had been removed on disk. On
+// startup we restore any such playlists exactly once (the last time this
+// plugin ever writes a playlist file), carry the still-active cooldowns
+// over, and delete the legacy file.
 // ============================================================
 
-$cooldownStateFile = $settings['configDirectory'] . '/showpilot-cooldowns.json';
+$cooldownActiveFile = $settings['configDirectory'] . '/showpilot-cooldown-active.json';
+$legacyCooldownFile = $settings['configDirectory'] . '/showpilot-cooldowns.json';
+$activeCooldowns = array();       // name => until (epoch secs)
+$cooldownExclude = array();
 
-function loadCooldownState() {
-    global $cooldownStateFile;
-    if (!file_exists($cooldownStateFile)) return array('snapshot' => array(), 'cooldowns' => array());
-    $json = @file_get_contents($cooldownStateFile);
-    if ($json === false) return array('snapshot' => array(), 'cooldowns' => array());
-    $data = json_decode($json, true);
-    if (!is_array($data)) return array('snapshot' => array(), 'cooldowns' => array());
-    if (!isset($data['snapshot'])) $data['snapshot'] = array();
-    if (!isset($data['cooldowns'])) $data['cooldowns'] = array();
-    return $data;
-}
-
-function saveCooldownState($state) {
-    global $cooldownStateFile;
-    @file_put_contents($cooldownStateFile, json_encode($state, JSON_PRETTY_PRINT));
-}
-
-// Snapshot the playlist at show start. Called when the plugin detects a new
-// playlist is playing. Stores the full mainPlaylist array so re-insertions
-// can restore entries to their exact original position and content.
-// Only snapshots if we don't already have one for this playlist — so a
-// plugin restart mid-show doesn't overwrite a snapshot that cooled-down
-// entries were already removed from.
-function maybeSnapshotPlaylist($playlistName) {
-    if (empty($playlistName)) return;
-
-    $state = loadCooldownState();
-
-    // Already have a snapshot for this playlist — don't overwrite.
-    // The snapshot was taken at show start and is the reference for all
-    // cooldown re-insertions this session. Overwriting mid-show would
-    // lose the original positions of already-removed entries.
-    if (isset($state['snapshot'][$playlistName])) return;
-
-    $playlistPath = '/home/fpp/media/playlists/' . $playlistName . '.json';
-    if (!file_exists($playlistPath)) return;
-    $json = @file_get_contents($playlistPath);
-    if ($json === false) return;
-    $data = json_decode($json, true);
-    if (!is_array($data) || !isset($data['mainPlaylist'])) return;
-
-    $state['snapshot'][$playlistName] = $data['mainPlaylist'];
-    saveCooldownState($state);
-    logEntry("[cooldown] Snapshotted playlist '$playlistName' (" . count($data['mainPlaylist']) . " items)");
-}
-
-
-// Write a playlist array back to disk atomically.
-function writePlaylist($playlistName, $data) {
-    $playlistPath = '/home/fpp/media/playlists/' . $playlistName . '.json';
-    $tmp = $playlistPath . '.tmp';
-    $written = @file_put_contents($tmp, json_encode($data, JSON_PRETTY_PRINT));
-    if ($written === false) {
-        logEntry("[cooldown] ERROR: could not write playlist temp file for '$playlistName'");
-        return false;
+function saveActiveCooldowns() {
+    global $cooldownActiveFile, $activeCooldowns, $cooldownExclude;
+    $data = array(
+        'cooldowns' => (object)$activeCooldowns,
+        'exclude'   => array_values($cooldownExclude),
+    );
+    $tmp = $cooldownActiveFile . '.tmp';
+    if (@file_put_contents($tmp, json_encode($data, JSON_PRETTY_PRINT)) === false) {
+        logEntry("[cooldown] ERROR: could not write $tmp");
+        return;
     }
-    if (!@rename($tmp, $playlistPath)) {
-        logEntry("[cooldown] ERROR: could not rename temp playlist file for '$playlistName'");
+    // World-readable on purpose: fppd (the reader) may not run as the same
+    // user as this listener, and the file holds only sequence names + times.
+    @chmod($tmp, 0644);
+    // Atomic replace so fppd never reads a half-written file.
+    if (!@rename($tmp, $cooldownActiveFile)) {
         @unlink($tmp);
-        return false;
-    }
-    return true;
-}
-
-// Apply playlistPatches from /state. For sequences entering cooldown,
-// remove them from the live playlist. For sequences leaving cooldown
-// (enabled:true patches), re-insert from snapshot.
-// Patches are stdClass objects from ofHttp — use object property access.
-function applyPlaylistPatches($patches, $currentPlaylist) {
-    if (empty($currentPlaylist) || !is_array($patches) || count($patches) === 0) return;
-
-    $playlistPath = '/home/fpp/media/playlists/' . $currentPlaylist . '.json';
-    if (!file_exists($playlistPath)) {
-        logEntry("[cooldown] Playlist file not found: $playlistPath");
-        return;
-    }
-
-    $json = @file_get_contents($playlistPath);
-    if ($json === false) return;
-    $data = json_decode($json, true);
-    if (!is_array($data) || !isset($data['mainPlaylist'])) return;
-
-    $state = loadCooldownState();
-    $modified = false;
-
-    foreach ($patches as $patch) {
-        $name      = isset($patch->sequenceName) ? $patch->sequenceName : '';
-        $enabled   = !empty($patch->enabled);
-        $reenableAt = isset($patch->reenableAt) ? $patch->reenableAt : null;
-        if ($name === '') continue;
-
-        if (!$enabled) {
-            // --- Sequence entering cooldown: remove from live playlist ---
-
-            // Already removed (cooldown already active from a previous poll)
-            if (isset($state['cooldowns'][$name])) continue;
-
-            // Find and remove the entry from the live array
-            $removed = false;
-            foreach ($data['mainPlaylist'] as $idx => $item) {
-                $entryFile = isset($item['sequenceName']) ? $item['sequenceName']
-                           : (isset($item['mediaName']) ? $item['mediaName'] : '');
-                if (pathinfo($entryFile, PATHINFO_FILENAME) !== $name) continue;
-                array_splice($data['mainPlaylist'], $idx, 1);
-                $removed = true;
-                $modified = true;
-                logEntry("[cooldown] Removed '$name' from playlist '$currentPlaylist'");
-                break;
-            }
-
-            if ($removed && $reenableAt) {
-                $state['cooldowns'][$name] = array(
-                    'reenableAt' => $reenableAt,
-                    'playlist'   => $currentPlaylist,
-                );
-            }
-        } else {
-            // --- Sequence leaving cooldown: re-insert from snapshot ---
-            // This path handles the case where ShowPilot sends enabled:true
-            // (cooldown expired server-side) before our own timer fires.
-            reinsertFromSnapshot($name, $currentPlaylist, $data, $state);
-            $modified = true;
-        }
-    }
-
-    if ($modified) {
-        writePlaylist($currentPlaylist, $data);
-        saveCooldownState($state);
+        logEntry("[cooldown] ERROR: could not update $cooldownActiveFile");
     }
 }
 
-// Re-insert a sequence into the live playlist array using the snapshot
-// for both the entry object and original index. Modifies $data and $state
-// in place — caller is responsible for writing both back to disk.
-function reinsertFromSnapshot($name, $playlist, &$data, &$state) {
-    // Find original entry and index in snapshot
-    if (!isset($state['snapshot'][$playlist])) {
-        logEntry("[cooldown] No snapshot for '$playlist' — cannot re-insert '$name'");
-        unset($state['cooldowns'][$name]);
-        return;
+function setCooldownExclude($list) {
+    global $cooldownExclude;
+    $list = array_values(array_unique(array_filter($list, 'strlen')));
+    if ($list !== $cooldownExclude) {
+        $cooldownExclude = $list;
+        saveActiveCooldowns();
     }
-
-    $snapshot = $state['snapshot'][$playlist];
-    $origIndex = null;
-    $origEntry = null;
-    foreach ($snapshot as $idx => $item) {
-        $entryFile = isset($item['sequenceName']) ? $item['sequenceName']
-                   : (isset($item['mediaName']) ? $item['mediaName'] : '');
-        if (pathinfo($entryFile, PATHINFO_FILENAME) === $name) {
-            $origIndex = $idx;
-            $origEntry = $item;
-            break;
-        }
-    }
-
-    if ($origEntry === null) {
-        logEntry("[cooldown] '$name' not found in snapshot for '$playlist' — skipping re-insert");
-        unset($state['cooldowns'][$name]);
-        return;
-    }
-
-    // Don't re-insert if it's already in the live playlist (avoid duplicates)
-    foreach ($data['mainPlaylist'] as $item) {
-        $entryFile = isset($item['sequenceName']) ? $item['sequenceName']
-                   : (isset($item['mediaName']) ? $item['mediaName'] : '');
-        if (pathinfo($entryFile, PATHINFO_FILENAME) === $name) {
-            // Already present — just clear the cooldown state
-            unset($state['cooldowns'][$name]);
-            return;
-        }
-    }
-
-    // Insert at original index, clamped to current array length
-    $insertAt = min($origIndex, count($data['mainPlaylist']));
-    array_splice($data['mainPlaylist'], $insertAt, 0, array($origEntry));
-    unset($state['cooldowns'][$name]);
-    logEntry("[cooldown] Re-inserted '$name' into playlist '$playlist' at index $insertAt");
 }
 
-// Check if any pending re-enables have come due. Called every loop iteration.
-function processPendingReenables($currentPlaylist) {
-    $state = loadCooldownState();
-    if (empty($state['cooldowns'])) return;
-
+// Drop expired entries. Returns true if anything changed.
+function pruneExpiredCooldowns() {
+    global $activeCooldowns;
     $now = time();
     $changed = false;
-
-    foreach ($state['cooldowns'] as $name => $entry) {
-        $reenableAt = isset($entry['reenableAt']) ? strtotime($entry['reenableAt']) : 0;
-        if ($reenableAt === false || $reenableAt > $now) continue;
-
-        // Due — re-insert into the playlist
-        $playlist = isset($entry['playlist']) ? $entry['playlist'] : $currentPlaylist;
-        if (empty($playlist)) {
-            unset($state['cooldowns'][$name]);
+    foreach ($activeCooldowns as $name => $until) {
+        if ($until <= $now) {
+            unset($activeCooldowns[$name]);
             $changed = true;
-            continue;
+            logEntry("[cooldown] '$name' cooldown ended");
         }
-
-        $playlistPath = '/home/fpp/media/playlists/' . $playlist . '.json';
-        if (!file_exists($playlistPath)) {
-            unset($state['cooldowns'][$name]);
-            $changed = true;
-            continue;
-        }
-
-        $json = @file_get_contents($playlistPath);
-        if ($json === false) continue;
-        $data = json_decode($json, true);
-        if (!is_array($data) || !isset($data['mainPlaylist'])) continue;
-
-        reinsertFromSnapshot($name, $playlist, $data, $state);
-        writePlaylist($playlist, $data);
-        $changed = true;
     }
+    return $changed;
+}
 
-    if ($changed) saveCooldownState($state);
+// Apply playlistPatches from /state. Patches are stdClass objects from ofHttp.
+function recordCooldownPatches($patches) {
+    global $activeCooldowns;
+    if (!is_array($patches)) return;
+    $changed = false;
+    foreach ($patches as $patch) {
+        $name = isset($patch->sequenceName) ? $patch->sequenceName : '';
+        if ($name === '') continue;
+        $enabled = !empty($patch->enabled);
+        if ($enabled) {
+            if (isset($activeCooldowns[$name])) {
+                unset($activeCooldowns[$name]);
+                $changed = true;
+                logEntry("[cooldown] '$name' re-enabled by ShowPilot");
+            }
+            continue;
+        }
+        $until = isset($patch->reenableAt) ? strtotime($patch->reenableAt) : false;
+        if ($until === false || $until <= time()) continue;
+        if (!isset($activeCooldowns[$name]) || $activeCooldowns[$name] !== $until) {
+            if (!isset($activeCooldowns[$name])) logEntry("[cooldown] '$name' in cooldown until " . date('c', $until));
+            $activeCooldowns[$name] = $until;
+            $changed = true;
+        }
+    }
+    if (pruneExpiredCooldowns()) $changed = true;
+    if ($changed) saveActiveCooldowns();
+}
+
+// One-time repair of playlists edited by plugin versions <= 0.13.x.
+function migrateLegacyCooldowns() {
+    global $legacyCooldownFile, $activeCooldowns;
+    if (!file_exists($legacyCooldownFile)) return;
+    $state = json_decode(@file_get_contents($legacyCooldownFile), true);
+    if (is_array($state) && !empty($state['cooldowns']) && is_array($state['cooldowns'])) {
+        $snapshots = isset($state['snapshot']) && is_array($state['snapshot']) ? $state['snapshot'] : array();
+        foreach ($state['cooldowns'] as $name => $entry) {
+            $playlist = isset($entry['playlist']) ? $entry['playlist'] : '';
+            if ($playlist !== '' && isset($snapshots[$playlist])) {
+                legacyRestoreEntry($name, $playlist, $snapshots[$playlist]);
+            }
+            $until = isset($entry['reenableAt']) ? strtotime($entry['reenableAt']) : false;
+            if ($until !== false && $until > time()) $activeCooldowns[$name] = $until;
+        }
+    }
+    @unlink($legacyCooldownFile);
+    logEntry("[cooldown] Migrated legacy cooldown state; playlists are no longer modified");
+}
+
+function legacyRestoreEntry($name, $playlist, $snapshot) {
+    $path = '/home/fpp/media/playlists/' . $playlist . '.json';
+    if (!file_exists($path)) return;
+    $data = json_decode(@file_get_contents($path), true);
+    if (!is_array($data) || !isset($data['mainPlaylist'])) return;
+
+    $fileOf = function ($item) {
+        $f = isset($item['sequenceName']) ? $item['sequenceName']
+           : (isset($item['mediaName']) ? $item['mediaName'] : '');
+        return pathinfo($f, PATHINFO_FILENAME);
+    };
+    foreach ($data['mainPlaylist'] as $item) {
+        if ($fileOf($item) === $name) return;   // already present
+    }
+    foreach ($snapshot as $idx => $item) {
+        if ($fileOf($item) !== $name) continue;
+        $at = min($idx, count($data['mainPlaylist']));
+        array_splice($data['mainPlaylist'], $at, 0, array($item));
+        $tmp = $path . '.tmp';
+        if (@file_put_contents($tmp, json_encode($data, JSON_PRETTY_PRINT)) !== false && @rename($tmp, $path)) {
+            logEntry("[cooldown] Restored '$name' to playlist '$playlist' at index $at (legacy repair)");
+        } else {
+            @unlink($tmp);
+            logEntry("[cooldown] ERROR: could not restore '$name' to playlist '$playlist'");
+        }
+        return;
+    }
 }
 
 // ============================================================
@@ -826,11 +728,11 @@ $sequencesClearedWhenIdle = false;
 $cachedMode = null;
 $cachedModeAt = 0;
 
-// On startup: process any cooldown re-enables that came due while the plugin
-// was stopped. Pass empty string for playlist — processPendingReenables uses
-// the stored playlist name from the cooldown state file, so it works even
-// before the first FPP status poll.
-processPendingReenables('');
+// On startup: repair any playlists left edited by pre-0.14 versions, then
+// publish the current cooldown state for the C++ hook.
+migrateLegacyCooldowns();
+pruneExpiredCooldowns();
+saveActiveCooldowns();
 
 while (true) {
     // Refresh settings each loop — allows the FPP UI to change things live
@@ -891,16 +793,6 @@ while (true) {
             $lastQueuedForSequence = '';
             $lastQueuedAt = 0;
             $lastWasRemote = false;
-            // Clear all playlist snapshots so the next show start gets fresh ones.
-            // We clear everything in the snapshot key rather than tracking which
-            // playlist was active — simpler and equally correct since idle means
-            // the show is done for now.
-            $idleState = loadCooldownState();
-            if (!empty($idleState['snapshot'])) {
-                $idleState['snapshot'] = array();
-                saveCooldownState($idleState);
-                logEntry("[cooldown] Cleared playlist snapshots (show ended)");
-            }
             logEntry_verbose("FPP idle. Cleared sequences on server.");
         }
         usleep($cfg['fppStatusCheckTime'] * 1000000);
@@ -909,17 +801,6 @@ while (true) {
 
     $sequencesClearedWhenIdle = false;
     $currentlyPlaying = getSequenceName($fppStatus);
-
-    // Snapshot the main scheduled playlist for cooldown re-insertion.
-    // maybeSnapshotPlaylist is idempotent — it only writes once and never
-    // overwrites an existing snapshot. We call it every loop so we don't
-    // need to track playlist transitions; it's a no-op after the first call.
-    // Never snapshot the remotePlaylist (ShowPilot's request pool).
-    $currentPlaylistNow = isset($fppStatus->current_playlist->playlist)
-        ? $fppStatus->current_playlist->playlist : '';
-    if (!empty($currentPlaylistNow) && $currentPlaylistNow !== $cfg['remotePlaylist']) {
-        maybeSnapshotPlaylist($currentPlaylistNow);
-    }
 
     // Only report changes
     if ($currentlyPlaying !== '' && $currentlyPlaying !== $lastPlayingReported) {
@@ -1087,13 +968,11 @@ while (true) {
     if ($shouldCheck && !empty($cfg['remotePlaylist'])) {
         $state = ofGetState();
         if ($state !== null) {
-            // Apply playlist cooldown patches — main playlist only
+            // Record cooldowns for the C++ playlist hook. No playlist files
+            // are touched; the hook only ever acts on the top-level playlist
+            // and skips anything listed in "exclude".
             if (isset($state->playlistPatches) && is_array($state->playlistPatches)) {
-                $currentPlaylistName = isset($fppStatus->current_playlist->playlist)
-                    ? $fppStatus->current_playlist->playlist : '';
-                if (!empty($currentPlaylistName) && $currentPlaylistName !== $cfg['remotePlaylist']) {
-                    applyPlaylistPatches($state->playlistPatches, $currentPlaylistName);
-                }
+                recordCooldownPatches($state->playlistPatches);
             }
 
             $nextSeq = null;
@@ -1178,17 +1057,14 @@ while (true) {
         }
     }
 
-    // Check for cooldown re-enables that have come due. This fires on every
-    // loop iteration so re-enables are prompt even when $shouldCheck is false
-    // (e.g. outside the request-fetch window) or ShowPilot is unreachable.
-    // Pass the current playlist only if it's the main one, not the remote pool.
-    $currentPlaylistForReenables = isset($fppStatus->current_playlist->playlist)
-        ? $fppStatus->current_playlist->playlist
-        : '';
-    if ($currentPlaylistForReenables === $cfg['remotePlaylist']) {
-        $currentPlaylistForReenables = '';
+    // Expire cooldowns promptly even when $shouldCheck is false or ShowPilot
+    // is unreachable. The C++ hook also ignores expired entries on its own,
+    // so this is housekeeping, not correctness.
+    if (!empty($activeCooldowns) && pruneExpiredCooldowns()) {
+        saveActiveCooldowns();
     }
-    processPendingReenables($currentPlaylistForReenables);
+    // Keep the hook's exclude list in sync with the configured request pool.
+    setCooldownExclude(array($cfg['remotePlaylist'], $queuePlaylistName));
 
     usleep($cfg['fppStatusCheckTime'] * 1000000);
 }

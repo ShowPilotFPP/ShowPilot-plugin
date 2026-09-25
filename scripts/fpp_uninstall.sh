@@ -22,6 +22,13 @@ rm -f "$PLUGIN_DIR/showpilot_proxy.php"
 rm -f "$PLUGIN_DIR/extract_audio.php"
 rm -f "$PLUGIN_DIR/listener_status.php"
 
+# Cooldown state (v0.14.0+) lives in FPP's config dir, outside the plugin
+# directory, so FPP's own cleanup won't remove it. The legacy (<=0.13.x)
+# file is removed too; it only mattered while that version was installed.
+CFG_DIR="${MEDIADIR:-/home/fpp/media}/config"
+rm -f "$CFG_DIR/showpilot-cooldown-active.json" "$CFG_DIR/showpilot-cooldown-active.json.tmp"
+rm -f "$CFG_DIR/showpilot-cooldowns.json"
+
 # Surface FPP's "Restart Required" banner so fppd cycles and releases any
 # handles it was holding on the plugin (listener process, MultiSync .so) —
 # fpp_install.sh already does this on install; uninstall needs it too.
