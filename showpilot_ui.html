@@ -49,6 +49,21 @@ function spInputAttrs($pluginName, $key, $expr) {
     </span>
   </div>
 
+  <?php
+  // v0.14.3: ShowPilot supports FPP 10+ only (pluginInfo.json). FPP 9 and
+  // older ignore pluginInfo.json when updating (plain git pull), so existing
+  // installs there keep receiving untested updates — tell the operator.
+  $spFppMajor = function_exists('getFPPMajorVersion') ? (int)getFPPMajorVersion() : 0;
+  $spFppVersion = function_exists('getFPPVersion') ? (string)getFPPVersion() : '';
+  if ($spFppMajor > 0 && $spFppMajor < 10): ?>
+    <div class="alert alert-danger" role="alert">
+      <strong>FPP <?php echo htmlspecialchars($spFppVersion !== '' ? $spFppVersion : (string)$spFppMajor); ?> is not supported.</strong>
+      ShowPilot now supports FPP 10 and newer only. On FPP 9 and older it may still run, but it is unreliable:
+      phone audio sync, cooldown skipping and plugin updates can misbehave, and new plugin versions are not tested on this FPP version.
+      Please upgrade FPP to version 10 or newer.
+    </div>
+  <?php endif; ?>
+
   <ul class="nav nav-pills pageContent-tabs flex-wrap row-gap-2 mb-3" role="tablist">
     <?php foreach (array('server' => 'Server', 'playlist' => 'Playlist', 'behavior' => 'Behavior',
         'listener' => 'Listener', 'audio' => 'Audio', 'diagnostics' => 'Diagnostics', 'developer' => 'Developer') as $tab => $label): ?>
