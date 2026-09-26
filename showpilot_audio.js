@@ -25,6 +25,7 @@
 const http = require('http');
 const fs   = require('fs');
 const path = require('path');
+const net  = require('net');
 const { execFileSync } = require('child_process');
 
 const PORT       = parseInt(process.env.PORT || '8090', 10);
@@ -53,7 +54,9 @@ function log(...args) {
 
 // ---- Shared state ----
 
-let fppStatus = { playing: false, filename: null, positionSec: 0 };
+// `at` = Date.now() when positionSec was observed (v0.14.6+), so every
+// broadcast can advance the position to the moment it is stamped.
+let fppStatus = { playing: false, filename: null, positionSec: 0, at: 0 };
 let lastFifoMsgAt = 0;
 let lastSyncPointAt = 0;
 const wsClients = new Set();
@@ -68,13 +71,23 @@ function broadcast(payload) {
   }
 }
 
+// v0.14.6: position is advanced to the send moment. Before, a position was
+// stamped with the time it was SENT, however long ago FPP reported it —
+// 0-100ms late from FIFO polling, and up to ~500ms for the forced sync point
+// after a song change — which made viewers' first estimate jump.
 function positionMessage(type) {
+  const now = Date.now();
+  let positionSec = fppStatus.positionSec;
+  if (fppStatus.playing && fppStatus.at > 0) {
+    const ageSec = (now - fppStatus.at) / 1000;
+    if (ageSec > 0 && ageSec < 5) positionSec += ageSec;
+  }
   return {
     type,
     playing: fppStatus.playing,
     filename: fppStatus.filename,
-    positionSec: fppStatus.positionSec,
-    serverTimestamp: Date.now(),
+    positionSec,
+    serverTimestamp: now,
   };
 }
 
@@ -109,7 +122,7 @@ function handleFppEvent(line) {
     const filename = parts.slice(1, -1).join('/');
     const positionSec = parseFloat(parts[parts.length - 1]);
     const changed = filename !== fppStatus.filename;
-    fppStatus = { playing: true, filename, positionSec };
+    fppStatus = { playing: true, filename, positionSec, at: Date.now() };
     if (changed) {
       log(`[fifo] now playing: "${filename}" at ${positionSec.toFixed(3)}s`);
       lastSyncPointAt = Date.now() + 800;
@@ -126,7 +139,7 @@ function handleFppEvent(line) {
   } else if (type === 'MediaSyncStart' && parts.length >= 2) {
     const filename = parts.slice(1).join('/');
     log(`[fifo] MediaSyncStart: "${filename}"`);
-    fppStatus = { playing: true, filename, positionSec: 0 };
+    fppStatus = { playing: true, filename, positionSec: 0, at: Date.now() };
     // Suppress sync points until the first packet carries a real position.
     lastSyncPointAt = Date.now() + 1000;
     broadcastPosition();
@@ -152,47 +165,73 @@ function ensureFifo() {
 }
 
 function startFifoListener() {
-  const readBuf = Buffer.alloc(4096);
   let buf = '';
-  let fd = -1;
+
+  function onData(text) {
+    lastFifoMsgAt = Date.now();
+    buf += text;
+    if (buf.length > 65536) buf = buf.slice(-4096);  // bound runaway lines
+    const lines = buf.split('\n');
+    buf = lines.pop();
+    lines.forEach(handleFppEvent);
+  }
 
   function openFifo() {
+    let fd = -1;
     try {
       ensureFifo();
-      // O_RDWR keeps the FIFO open even with no writer attached.
+      // O_RDWR keeps the FIFO open even with no writer attached (no EOF).
       fd = fs.openSync(FIFO_PATH,
         fs.constants.O_RDWR | fs.constants.O_NONBLOCK | fs.constants.O_NOFOLLOW);
-      log(`[fifo] listening on ${FIFO_PATH}`);
-      readLoop();
     } catch (err) {
       log(`[fifo] open failed: ${err.message}`);
       setTimeout(openFifo, 2000);
+      return;
     }
+
+    // v0.14.6: event-driven — each FPP event is handled the moment it is
+    // written (libuv watches the pipe), instead of being picked up by a
+    // 100ms poll that stamped positions 0-100ms late.
+    let pipe;
+    try {
+      pipe = new net.Socket({ fd, readable: true, writable: false });
+    } catch (err) {
+      log(`[fifo] event-driven read unavailable (${err.message}); falling back to 20ms polling`);
+      pollLoop(fd);
+      return;
+    }
+    pipe.setEncoding('utf8');
+    pipe.on('data', onData);
+    let reopening = false;
+    const reopen = (why) => {
+      if (reopening) return;
+      reopening = true;
+      log(`[fifo] ${why}; reopening`);
+      try { pipe.destroy(); } catch (_) { /* already closed */ }
+      setTimeout(openFifo, 1000);
+    };
+    pipe.on('error', (err) => reopen(`read error: ${err.message}`));
+    pipe.on('close', () => reopen('closed'));
+    log(`[fifo] listening on ${FIFO_PATH} (event-driven)`);
   }
 
-  function readLoop() {
-    if (fd < 0) return;
-    try {
-      const n = fs.readSync(fd, readBuf, 0, readBuf.length, null);
-      if (n > 0) {
-        lastFifoMsgAt = Date.now();
-        buf += readBuf.toString('utf8', 0, n);
-        if (buf.length > 65536) buf = buf.slice(-4096);  // bound runaway lines
-        const lines = buf.split('\n');
-        buf = lines.pop();
-        lines.forEach(handleFppEvent);
+  // Fallback only: short-interval non-blocking reads.
+  function pollLoop(fd) {
+    const readBuf = Buffer.alloc(4096);
+    (function tick() {
+      try {
+        const n = fs.readSync(fd, readBuf, 0, readBuf.length, null);
+        if (n > 0) onData(readBuf.toString('utf8', 0, n));
+      } catch (err) {
+        if (err.code !== 'EAGAIN' && err.code !== 'EWOULDBLOCK') {
+          log(`[fifo] read error: ${err.message}`);
+          try { fs.closeSync(fd); } catch (_) { /* already closed */ }
+          setTimeout(openFifo, 1000);
+          return;
+        }
       }
-    } catch (err) {
-      if (err.code !== 'EAGAIN' && err.code !== 'EWOULDBLOCK') {
-        log(`[fifo] read error: ${err.message}`);
-        try { fs.closeSync(fd); } catch (_) { /* already closed */ }
-        fd = -1;
-        setTimeout(openFifo, 1000);
-        return;
-      }
-    }
-    // FPP sends a sync packet every 500ms; 100ms polling is plenty.
-    setTimeout(readLoop, 100);
+      setTimeout(tick, 20);
+    })();
   }
 
   openFifo();
@@ -210,7 +249,7 @@ async function pollFppStatus() {
     const filename = data.current_song || null;
     const positionSec = parseFloat(data.seconds_elapsed || 0);
     const changed = filename !== fppStatus.filename || playing !== fppStatus.playing;
-    fppStatus = { playing, filename, positionSec };
+    fppStatus = { playing, filename, positionSec, at: Date.now() };
     if (changed && filename) {
       log(`[http] now playing: "${filename}" at ${positionSec.toFixed(1)}s`);
     }
