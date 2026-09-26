@@ -38,6 +38,12 @@ remove_legacy_csp_origin
 
 # FPP 10+ loads the plugin live after install; older releases in
 # pluginInfo.json's versions[] range need an fppd restart to pick it up.
-setSetting restartFlag 1
+# Best-effort, in a subshell without set -e/pipefail: FPP's setSetting does
+# OLD=$(grep ... | sed ...), which under pipefail fails whenever the key isn't
+# in the settings file yet (any fresh FPP), and it `exit 1`s if the settings
+# file is momentarily locked. Either would fail an install that already
+# succeeded.
+(set +e +o pipefail; setSetting restartFlag 1) \
+    || echo "WARN: could not set FPP's restart flag — restart fppd to load the plugin"
 
 #fpp_install
