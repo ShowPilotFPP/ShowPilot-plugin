@@ -4,7 +4,7 @@
 
 The Falcon Player (FPP) plugin for [ShowPilot](https://github.com/ShowPilotFPP/ShowPilot) — a self-hosted replacement for Remote Falcon.
 
-This plugin connects an FPP instance to your ShowPilot server. It reports playback state to ShowPilot and queues sequences when viewers vote or make jukebox requests.
+This plugin connects an FPP instance to your ShowPilot server. It reports playback state to ShowPilot, queues sequences when viewers vote or make jukebox requests, and provides the precise playback position that keeps viewers' phone audio in sync. In FPP it appears as **ShowPilot Blackbox**, with its settings under **Content Setup → ShowPilot**.
 
 ## What this plugin does
 
@@ -14,26 +14,30 @@ This plugin connects an FPP instance to your ShowPilot server. It reports playba
 - Queues that sequence in FPP via `Insert Playlist Immediate` or `Insert Playlist After Current`
 - Pushes the playlist contents to ShowPilot so the viewer page knows what songs exist
 - Heartbeats back to ShowPilot so the admin page can show plugin connectivity
+- Runs a small audio daemon (Node.js) that follows FPP's playback position in real time and relays it to ShowPilot, so phones listening to the show stay in sync, and serves your show audio to ShowPilot when you sync with audio upload
+- Includes a small FPP component (C++, built at install) that can skip songs in cooldown during FPP's normal playlist rotation, without editing your playlists (only when that option is on in ShowPilot)
 
 ## Requirements
 
-- FPP 5.0 or newer (tested on FPP 9.5; FPP 10.0-beta compatibility verified via source-level API/build audit, not yet run on live 10.x hardware)
+- **FPP 10.0 or newer.** Older FPP versions aren't supported: the settings page shows a warning there and the plugin may not work reliably. Upgrade FPP first.
 - A running [ShowPilot](https://github.com/ShowPilotFPP/ShowPilot) server reachable from the FPP
+- Node.js, which the installer adds from Debian's packages if it's missing (only `nodejs`; the daemon's one library is bundled)
 
 ## Install
 
-### Via FPP Plugin Manager (recommended once it's in the master plugin list)
+### Via FPP Plugin Manager's list
 
-**Pending** — once this plugin is added to the [FalconChristmas plugin list](https://github.com/FalconChristmas/fpp-data) you'll be able to install with one click. For now, install manually.
+Once this plugin appears in the [FalconChristmas plugin list](https://github.com/FalconChristmas/fpp-data), you can install it with one click. Until then, install it by URL as below.
 
-### Manual install
+### Install by URL
 
 In FPP, open **Content Setup → Plugin Manager**, paste
 `https://raw.githubusercontent.com/ShowPilotFPP/ShowPilot-plugin/main/pluginInfo.json`
 into the plugin URL box, and click **Get Plugin Info**, then **Install**. FPP clones the
-plugin, runs its install script, and asks for an fppd restart.
+plugin and runs its install script. FPP 10 loads the plugin right away; if FPP still shows a
+restart prompt, restarting is harmless.
 
-Then open the plugin's config page and fill in:
+Then open **Content Setup → ShowPilot** and fill in:
 
 - **Server URL**: `http://your-showpilot-server:3100` (no trailing slash; use `https://` for a server outside your home network)
 - **Show Token**: copy from your ShowPilot admin page → "Show Token (for ShowPilot Plugin)" section
@@ -74,10 +78,11 @@ The plugin exposes several commands you can schedule via FPP's command preset/sc
 
 | Command | Effect |
 |---|---|
-| ShowPilot - Turn Viewer Control On | Restores last active mode (Voting or Jukebox) |
+| ShowPilot - Turn Viewer Control On | Restores the last active mode (Voting, Jukebox or Race) |
 | ShowPilot - Turn Viewer Control Off | Disables viewer control |
 | ShowPilot - Switch to Voting Mode | Forces voting mode |
 | ShowPilot - Switch to Jukebox Mode | Forces jukebox mode |
+| ShowPilot - Switch to Race Mode | Forces race mode |
 | ShowPilot - Restart Listener | Reloads plugin config |
 | ShowPilot - Stop Listener | Stops the listener (turns plugin off) |
 | ShowPilot - Turn Interrupt Schedule On | Force-on the "interrupt schedule" plugin setting |
@@ -88,24 +93,23 @@ A typical setup: schedule "Turn Viewer Control On" 30 minutes before showtime, "
 ## Architecture
 
 ```
-[FPP]  ──┬─▶ /api/system/status  (polled by listener)
-         └─▶ /api/command/Insert Playlist Immediate (queues viewer picks)
-              ▲
-              │
-[Plugin Listener (PHP)] ──HTTP──▶  [ShowPilot Server]
-   |
-   └── Reads <mediadir>/playlists/<remote-playlist>.json
-       to determine "next up" and to sync sequence list
+[FPP] ──┬─▶ /api/system/status            (polled by the listener)
+        ├─▶ /api/command/Insert Playlist … (queues viewer picks)
+        └─▶ playback events ──▶ [FPP component (C++)] ──FIFO──▶ [Audio daemon (Node.js)]
+                                  (cooldown skip)                  │ position, in real time
+[Plugin Listener (PHP)] ──HTTP──▶ [ShowPilot Server] ◀──WebSocket──┘
+   └── reads <mediadir>/playlists/<remote-playlist>.json
+       to determine "next up" and to sync the sequence list
 ```
 
-The listener is a long-running PHP process (started by FPP's plugin system at boot via `scripts/postStart.sh`, running as the `fpp` user). It polls every second and is gentle on FPP's CPU.
+The listener and audio daemon are long-running processes started by FPP at boot (and by **Restart FPPD**) via `scripts/postStart.sh`, running as the `fpp` user. The listener polls every second and is gentle on FPP's CPU; the daemon reacts to FPP's playback events as they happen.
 
 All browser-to-ShowPilot API calls (Sync, Test Connectivity, audio upload) are routed through `showpilot_proxy.php` on FPP rather than going directly to the ShowPilot server. This keeps all requests same-origin, preventing ad blockers and browser extensions from interfering.
 
 ## Troubleshooting
 
-**Plugin UI page won't save settings**
-FPP 9+ moved its plugin JS helpers. The plugin uses FPP's REST API directly to save settings. If your FPP is older than 5.0 this won't work — upgrade FPP.
+**Settings page shows "not supported" or doesn't work properly**
+The plugin requires FPP 10.0 or newer. Upgrade FPP, then update the plugin.
 
 **Sync or Test Connectivity fails / does nothing**
 Most likely a browser extension (ad blocker, privacy extension) blocking the request. All ShowPilot API calls are routed through `showpilot_proxy.php` on FPP itself and should be same-origin and extension-safe — but if you're still seeing issues, check your browser console for `ERR_BLOCKED_BY_CLIENT` errors. Temporarily disabling extensions or using an Incognito window (which disables extensions by default) will confirm if that's the cause.
@@ -116,7 +120,7 @@ log, `plugin-showpilot-plugin.log`, viewable under **Status/Control → Logs** o
 config page's Diagnostics tab.
 
 **Plugin queues wrong song**
-Make sure you've clicked **Sync Playlist** in the plugin UI after any changes to your FPP playlist contents/order.
+Make sure you've clicked **Sync Now** in the plugin UI after any changes to your FPP playlist contents/order.
 
 ## License
 
