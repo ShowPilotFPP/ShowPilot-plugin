@@ -105,8 +105,13 @@ stop_audio_daemon() {
     return 0
 }
 
+# Both long-running children close fd 9 (9<&-). postStart.sh holds its
+# single-instance flock on fd 9, and a child that inherits it keeps the lock
+# for as long as it runs — every later postStart (e.g. "Restart FPPD", which
+# runs only the start hooks) then hits `flock -n 9 || exit 0` and silently
+# leaves the old listener/daemon running with stale code and config.
 start_listener() {
-    setsid "${run_as_fpp[@]}" php "$LISTENER" </dev/null >>"$PLUGIN_LOG" 2>&1 &
+    setsid "${run_as_fpp[@]}" php "$LISTENER" </dev/null >>"$PLUGIN_LOG" 2>&1 9<&- &
 }
 
 # The daemon listens on the LAN, so it only starts once the operator has
@@ -126,7 +131,7 @@ start_audio_daemon() {
 
     PORT="$port" MEDIA_ROOT="${MEDIADIR}/music" FPP_HOST="http://127.0.0.1" LOG_FILE="$PLUGIN_LOG" \
         setsid "${run_as_fpp[@]}" "$(command -v node)" --max-old-space-size=64 "$AUDIO_DAEMON" \
-        </dev/null >>"$PLUGIN_LOG" 2>&1 &
+        </dev/null >>"$PLUGIN_LOG" 2>&1 9<&- &
 }
 
 # Versions before 0.14.2 added the ShowPilot server to FPP's connect-src CSP
