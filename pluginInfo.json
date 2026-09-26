@@ -12,8 +12,8 @@
 	"minCpuCores": 1,
 	"versions": [
 		{
-			"minFPPVersion": "5.0",
-			"maxFPPVersion": "7.99",
+			"minFPPVersion": "10.0",
+			"maxFPPVersion": "0",
 			"branch": "main",
 			"sha": ""
 		},
