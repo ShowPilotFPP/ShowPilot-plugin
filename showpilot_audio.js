@@ -320,10 +320,13 @@ const server = http.createServer((req, res) => {
 // ---- WebSocket upgrade handling ----
 
 let WebSocketServer = null;
-try {
-  ({ WebSocketServer } = require('ws'));
-} catch (_) {
-  log('WARN: ws module not installed — re-run the plugin install script. Position broadcast disabled.');
+// v0.14.5: ws is vendored in vendor/ws (no npm needed). The plain
+// require('ws') fallback covers a node_modules copy from older installs.
+for (const mod of [path.join(__dirname, 'vendor', 'ws'), 'ws']) {
+  try { ({ WebSocketServer } = require(mod)); break; } catch (_) {}
+}
+if (!WebSocketServer) {
+  log('WARN: ws module not found (vendor/ws missing?) — position broadcast disabled.');
 }
 
 if (WebSocketServer) {

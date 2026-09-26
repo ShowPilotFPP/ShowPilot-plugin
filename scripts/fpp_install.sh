@@ -13,18 +13,11 @@ chown -R fpp:fpp "$PLUGIN_DIR"
 chmod +x "$PLUGIN_DIR"/commands/*.php "$PLUGIN_DIR"/scripts/*.sh
 
 # ---- Node.js (audio daemon) ----
-# Debian's own nodejs package. FPP 10+ also installs it from pluginInfo.json's
-# dependencies; this covers older releases. Best-effort: without Node the
-# listener still works, only the audio daemon is skipped.
-if ! node_ok; then
-    echo "Installing Node.js from the Debian archive..."
-    apt-get install -y nodejs npm || echo "WARN: Node.js install failed — the audio daemon will not start"
-fi
-if node_ok; then
-    install_node_modules || echo "WARN: npm install failed — WebSocket position sync disabled"
-else
-    echo "WARN: Node.js ${MIN_NODE_MAJOR}+ not available — the audio daemon will not start"
-fi
+# Debian's nodejs package only (ws is vendored — see vendor/README.md).
+# Best-effort: without Node the listener still works, only the audio daemon
+# is skipped.
+install_nodejs || echo "WARN: Node.js ${MIN_NODE_MAJOR}+ not available — the audio daemon will not start"
+remove_legacy_node_modules
 
 # ---- C++ MultiSync plugin ----
 # fppd dlopen()s lib<install-dir-name>.so (see Makefile). Best-effort: without

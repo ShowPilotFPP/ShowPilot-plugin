@@ -67,14 +67,21 @@ node_ok() {
     [ "${major:-0}" -ge "$MIN_NODE_MAJOR" ] 2>/dev/null
 }
 
-# Installs the audio daemon's pinned npm dependencies (package-lock.json).
-install_node_modules() {
-    node_ok || return 1
-    (
-        cd "$PLUGIN_DIR" || exit 1
-        npm ci --omit=dev --no-audit --no-fund 2>&1 || npm install --omit=dev --no-audit --no-fund 2>&1
-    ) || return 1
-    chown -R fpp:fpp "$PLUGIN_DIR/node_modules"
+# Installs Debian's nodejs package only. The daemon's one library (ws) is
+# vendored in vendor/ws, so npm isn't needed — Debian's npm package alone
+# pulls in hundreds of packages. Retries once after refreshing package lists,
+# which are often stale on a fresh FPP image.
+install_nodejs() {
+    node_ok && return 0
+    echo "Installing Node.js (nodejs only, no npm) from the Debian archive..."
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nodejs \
+        || { apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nodejs; }
+    node_ok
+}
+
+# Versions before 0.14.5 ran npm into node_modules/; ws now ships in vendor/.
+remove_legacy_node_modules() {
+    rm -rf "$PLUGIN_DIR/node_modules"
 }
 
 wait_for_exit() {

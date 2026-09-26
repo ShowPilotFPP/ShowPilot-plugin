@@ -16,5 +16,5 @@ plugin.showpilot
 # ShipPilot release manifest (never committed; defense in depth)
 .release.json
 
-# npm install output (dependencies are pinned in package-lock.json)
+# Left over from npm installs before 0.14.5 (ws is vendored in vendor/ws now)
 node_modules/

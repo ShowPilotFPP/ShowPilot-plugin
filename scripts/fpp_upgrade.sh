@@ -58,10 +58,10 @@ if [ "$HOTRELOAD_OK" = "1" ]; then
     fi
 fi
 
-# ---- 4. Node dependencies may have changed with the new code.
-if node_ok; then
-    install_node_modules || echo "WARN: npm install failed — WebSocket position sync disabled"
-fi
+# ---- 4. Node: nodejs only (ws is vendored since 0.14.5). Clear the old
+# npm-installed node_modules so the vendored copy is the one in use.
+install_nodejs || echo "WARN: Node.js ${MIN_NODE_MAJOR}+ not available — the audio daemon will not start"
+remove_legacy_node_modules
 
 remove_legacy_csp_origin
 
