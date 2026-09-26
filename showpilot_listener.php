@@ -39,7 +39,7 @@ function logEntry_verbose($data) {
 // Init defaults
 // ============================================================
 
-logEntry("Starting ShowPilot Plugin v" . $PLUGIN_VERSION);
+logEntry("Starting ShowPilot Blackbox v" . $PLUGIN_VERSION);
 
 WriteSettingToFile("pluginVersion", urlencode($PLUGIN_VERSION), SP_SETTINGS_KEY);
 
@@ -624,7 +624,7 @@ while (true) {
     if ($restarting) {
         WriteSettingToFile("listenerEnabled", urlencode("true"), SP_SETTINGS_KEY);
         WriteSettingToFile("listenerRestarting", urlencode("false"), SP_SETTINGS_KEY);
-        logEntry("Restarting ShowPilot Plugin v" . $PLUGIN_VERSION);
+        logEntry("Restarting ShowPilot Blackbox v" . $PLUGIN_VERSION);
         $cfg = loadRuntimeSettings() ?? $cfg;
         logEntry("Server URL: " . $cfg['serverUrl']);
     }

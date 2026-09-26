@@ -1,6 +1,6 @@
 {
 	"repoName": "showpilot-plugin",
-	"name": "ShowPilot Plugin",
+	"name": "ShowPilot Blackbox",
 	"author": "ShowPilot Project",
 	"description": "Connects FPP to a self-hosted ShowPilot server for viewer voting, jukebox requests and phone audio sync/playback. Sends what is playing, your request playlist's song list and, when you click Sync, those songs' audio to that server. Runs an audio server on your local network (port 8090 by default) once a server is configured, and, if you turn on ShowPilot's cooldown-skip option, skips songs in cooldown during your normal playlist rotation.",
 	"homeURL": "https://github.com/ShowPilotFPP/ShowPilot-plugin",
