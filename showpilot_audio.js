@@ -375,6 +375,23 @@ if (WebSocketServer) {
     wsClients.add(ws);
     log(`WebSocket connected (${wsClients.size} total) from ${req.socket.remoteAddress}`);
     ws.send(JSON.stringify(positionMessage('position')));
+    // Sync probe (debug, v0.14.10): a viewer's player can connect directly
+    // to measure how far the relayed position is from this daemon's. It
+    // sends 'timeReq' (answered at once with this machine's clock, for an
+    // NTP-style offset) and 'probeHello' (opts in to FPP's own status
+    // position, polled below, to compare the two position sources). The
+    // ShowPilot server's relay never sends either.
+    ws.on('message', (data) => {
+      let m = null;
+      try { m = JSON.parse(String(data)); } catch (_) { return; }
+      if (!m || typeof m !== 'object') return;
+      if (m.type === 'timeReq') {
+        try { ws.send(JSON.stringify({ type: 'timeResp', t0: m.t0, daemonNow: Date.now() })); } catch (_) {}
+      } else if (m.type === 'probeHello' && !ws.isProbe) {
+        ws.isProbe = true;
+        log(`Sync probe connected from ${req.socket.remoteAddress}`);
+      }
+    });
     ws.on('close', () => { wsClients.delete(ws); log(`WebSocket disconnected (${wsClients.size} remaining)`); });
     ws.on('error', () => wsClients.delete(ws));
   });
@@ -394,6 +411,36 @@ if (WebSocketServer) {
 setInterval(() => {
   broadcast({ type: 'heartbeat', playing: fppStatus.playing, serverTimestamp: Date.now() });
 }, 5000);
+
+// ---- Sync probe: FPP's own status position (debug, v0.14.10) ----
+// Only while a probe client is connected. The position is stamped at the
+// midpoint of the request, so its own HTTP time roughly cancels out.
+let probePolling = false;
+setInterval(async () => {
+  if (probePolling) return;
+  const probes = [...wsClients].filter(ws => ws.isProbe && ws.readyState === ws.OPEN);
+  if (!probes.length) return;
+  probePolling = true;
+  try {
+    const t0 = Date.now();
+    const res = await fetch(`${FPP_HOST}/api/fppd/status`, { signal: AbortSignal.timeout(1500) });
+    const t1 = Date.now();
+    if (!res.ok) return;
+    const data = await res.json();
+    const num = (v) => { const n = parseFloat(v); return isFinite(n) ? n : null; };
+    const msg = JSON.stringify({
+      type: 'apiPosition',
+      playing: data.status === 1 || data.status === 'playing',
+      filename: data.current_song || null,
+      secondsPlayed: num(data.seconds_played),
+      secondsElapsed: num(data.seconds_elapsed),
+      millisecondsElapsed: num(data.milliseconds_elapsed),
+      daemonAt: Math.round((t0 + t1) / 2),
+      requestMs: t1 - t0,
+    });
+    for (const ws of probes) { try { ws.send(msg); } catch (_) {} }
+  } catch (_) { /* fppd busy or unreachable — next tick */ } finally { probePolling = false; }
+}, 500);
 
 // ---- Start ----
 

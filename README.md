@@ -106,6 +106,10 @@ The listener and audio daemon are long-running processes started by FPP at boot 
 
 All browser-to-ShowPilot API calls (Sync, Test Connectivity, audio upload) are routed through `showpilot_proxy.php` on FPP rather than going directly to the ShowPilot server. This keeps all requests same-origin, preventing ad blockers and browser extensions from interfering.
 
+## Sync probe (debugging)
+
+The audio daemon also supports ShowPilot's debug **Sync probe** (Settings → Debug in ShowPilot beta builds): a viewer's player connects straight to the daemon to measure how far the relayed position is from FPP's own, and to compare FPP's status position with the event-driven one. It's dormant unless a probe connects — the daemon only answers timing pings, and polls FPP's status twice a second only while a probe is connected. Normal listeners and the ShowPilot relay are unaffected.
+
 ## Troubleshooting
 
 **Settings page shows "not supported" or doesn't work properly**
