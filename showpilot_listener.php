@@ -169,9 +169,15 @@ function ofReportPosition($sequenceName, $secondsPlayed) {
     ));
 }
 
-// Tell ShowPilot what's scheduled next
-function ofReportNext($sequenceName) {
-    return ofHttp('POST', '/api/plugin/next', array('sequence' => $sequenceName));
+// Tell ShowPilot what's scheduled next. $exact = true means the value comes
+// from FPP's live play order (shuffle included) and is the truth -- an empty
+// name then means "nothing knowable is next", so ShowPilot must not guess
+// from playlist order. Older servers ignore the extra field.
+function ofReportNext($sequenceName, $exact = false) {
+    return ofHttp('POST', '/api/plugin/next', array(
+        'sequence' => $sequenceName,
+        'exact'    => (bool)$exact,
+    ));
 }
 
 // Heartbeat
@@ -532,22 +538,165 @@ function getSequenceName($fppStatus) {
     return $name;
 }
 
+// Base name of a playlist entry's song, the way the native hook names it
+// (src/FPPShowPilotSync.cpp entryName): sequence/both -> sequenceName,
+// media -> mediaName, anything else (pause, command, ...) -> ''.
+function sp_entry_song_name($e) {
+    if (!is_array($e)) return '';
+    $type = isset($e['type']) ? $e['type'] : '';
+    if ($type === 'sequence' || $type === 'both') $f = isset($e['sequenceName']) ? $e['sequenceName'] : '';
+    elseif ($type === 'media') $f = isset($e['mediaName']) ? $e['mediaName'] : '';
+    else return '';
+    return pathinfo((string)$f, PATHINFO_FILENAME);
+}
+
+// Entries whose effect on "what plays next" can't be predicted.
+function sp_entry_unpredictable($e) {
+    $type = is_array($e) && isset($e['type']) ? $e['type'] : '';
+    return in_array($type, array('playlist', 'branch', 'dynamic', 'remap'), true);
+}
+
+// FPP's running playlist as it is in memory -- for a random playlist, the
+// shuffled order FPP will actually play, with each entry's isPlaying flag.
+function getLivePlaylistConfig() {
+    $context = stream_context_create(array('http' => array('timeout' => 3)));
+    $result = @file_get_contents("http://127.0.0.1/api/fppd/playlist/config", false, $context);
+    if ($result === false) return null;
+    $data = json_decode($result, true);
+    return is_array($data) ? $data : null;
+}
+
+// Works out the next song from FPP's live order, following FPP's own rules
+// (Playlist.cpp): lead-in -> main -> loop or lead-out; a main loop repeats
+// when repeat is on and loopCount (if set) isn't reached; random=2 reshuffles
+// at every loop, so the first song of the next loop can't be known yet.
+// Cooled songs are skipped the way the native hook skips them: only moving
+// forward inside the main section (never across the loop boundary), and not
+// when every remaining main song is cooled.
+// Returns the song name, '' when nothing knowable is next, or null when the
+// live data doesn't show what's playing (caller falls back).
+function sp_next_from_live($live, $cooled) {
+    $sections = array();
+    foreach (array('leadIn', 'mainPlaylist', 'leadOut') as $sec) {
+        $sections[$sec] = (isset($live[$sec]) && is_array($live[$sec])) ? array_values($live[$sec]) : array();
+    }
+
+    $curSec = null; $curIdx = -1;
+    foreach ($sections as $sec => $items) {
+        foreach ($items as $i => $e) {
+            if (!empty($e['isPlaying'])) { $curSec = $sec; $curIdx = $i; break 2; }
+        }
+    }
+    if ($curSec === null) {
+        foreach ($sections as $sec => $items) {
+            foreach ($items as $i => $e) {
+                if (!empty($e['isStarted']) && empty($e['isFinished'])) { $curSec = $sec; $curIdx = $i; break 2; }
+            }
+        }
+    }
+    if ($curSec === null) return null;
+
+    $main = $sections['mainPlaylist'];
+    $repeat = !empty($live['repeat']);
+    $loop = isset($live['loop']) ? intval($live['loop']) : 0;
+    $loopCount = isset($live['loopCount']) ? intval($live['loopCount']) : 0;
+    $random = isset($live['random']) ? intval($live['random']) : 0;
+    $loopsAgain = $repeat && ($loopCount <= 0 || ($loop + 1) < $loopCount);
+
+    // First playable song in $items from $from on. $skipCooled mirrors the
+    // hook's jump inside the main section.
+    $scan = function ($items, $from, $skipCooled) use ($cooled) {
+        $firstCooled = null;
+        for ($i = $from; $i < count($items); $i++) {
+            $e = $items[$i];
+            if (isset($e['enabled']) && !$e['enabled']) continue;   // disabled entries don't play
+            if (sp_entry_unpredictable($e)) return array('stop' => true);
+            $n = sp_entry_song_name($e);
+            if ($n === '') continue;
+            if ($skipCooled && isset($cooled[$n])) {
+                if ($firstCooled === null) $firstCooled = $n;
+                continue;
+            }
+            return array('name' => $n);
+        }
+        // Every remaining main song is cooled: the hook lets the first play.
+        if ($firstCooled !== null) return array('name' => $firstCooled);
+        return null;
+    };
+
+    if ($curSec === 'leadIn') {
+        $r = $scan($sections['leadIn'], $curIdx + 1, false);
+        if ($r !== null) return isset($r['stop']) ? '' : $r['name'];
+        // Lead-in done: start of main, where the hook's cooldown skip applies.
+        $r = $scan($main, 0, true);
+        if ($r !== null) return isset($r['stop']) ? '' : $r['name'];
+    } elseif ($curSec === 'mainPlaylist') {
+        $r = $scan($main, $curIdx + 1, true);
+        if ($r !== null) return isset($r['stop']) ? '' : $r['name'];
+    } else {
+        $r = $scan($sections['leadOut'], $curIdx + 1, false);
+        if ($r !== null) return isset($r['stop']) ? '' : $r['name'];
+        return '';   // end of playlist: whatever the scheduler does next
+    }
+
+    // End of the main section.
+    if ($loopsAgain && count($main)) {
+        if ($random === 2) return '';          // reshuffled at the loop: unknowable yet
+        $r = $scan($main, 0, false);           // hook never skips across the loop
+        if ($r !== null) return isset($r['stop']) ? '' : $r['name'];
+        return '';
+    }
+    $r = $scan($sections['leadOut'], 0, false);
+    if ($r !== null) return isset($r['stop']) ? '' : $r['name'];
+    return '';
+}
+
+// What's next on FPP. Returns array('name' => string, 'exact' => bool).
+// exact=false keeps ShowPilot's own fallbacks (vote/queue/baseline/order).
+$liveNextCache = array('key' => '', 'at' => 0, 'result' => null);
+
 function getNextScheduledSequence($fppStatus, $currentlyPlaying, $remotePlaylist) {
+    global $activeCooldowns, $cooldownExclude, $liveNextCache;
+    $none = array('name' => '', 'exact' => false);
+
     // If nothing's playing, we have no basis for "what's next"
-    if (empty($currentlyPlaying)) return "";
+    if (empty($currentlyPlaying)) return $none;
 
-    // Determine the current playlist name
-    if (!isset($fppStatus->current_playlist) || $fppStatus->current_playlist === null) return "";
+    if (!isset($fppStatus->current_playlist) || $fppStatus->current_playlist === null) return $none;
     $currentPlaylist = isset($fppStatus->current_playlist->playlist) ? $fppStatus->current_playlist->playlist : "";
-    if ($currentPlaylist === "") return "";
+    if ($currentPlaylist === "") return $none;
 
-    // When the remote (pool) playlist is what's active, "next" is whatever gets voted/requested.
-    // Don't overwrite what ShowPilot already knows in that case.
-    if ($currentPlaylist === $remotePlaylist) return "";
+    // When the remote (pool) playlist or our request queue is what's active,
+    // "next" is whatever gets voted/requested. ShowPilot already knows that.
+    if ($currentPlaylist === $remotePlaylist || $currentPlaylist === QUEUE_PLAYLIST) return $none;
 
-    // Find the item after the currently playing sequence
+    // Cooldowns the native hook enforces for this playlist.
+    $cooled = array();
+    if (!in_array($currentPlaylist, $cooldownExclude, true)) {
+        $now = time();
+        foreach ($activeCooldowns as $n => $until) if ($until > $now) $cooled[(string)$n] = true;
+    }
+
+    // Live order from fppd. Fetched again on every song change, cooldown
+    // change, or after a few seconds -- not on every 0.5s tick.
+    $key = $currentPlaylist . "\n" . $currentlyPlaying . "\n" . implode(',', array_keys($cooled));
+    if ($liveNextCache['key'] !== $key || (time() - $liveNextCache['at']) >= 5) {
+        $result = null;
+        $live = getLivePlaylistConfig();
+        if ($live !== null && isset($live['name']) && $live['name'] === $currentPlaylist) {
+            $n = sp_next_from_live($live, $cooled);
+            if ($n !== null) $result = array('name' => $n, 'exact' => true);
+        }
+        $liveNextCache = array('key' => $key, 'at' => time(), 'result' => $result);
+    }
+    if ($liveNextCache['result'] !== null) return $liveNextCache['result'];
+
+    // Fallback: the playlist file on disk. Its order is only what plays when
+    // the playlist isn't random; for a random playlist say nothing rather
+    // than name a song that won't play.
     $data = sp_read_playlist($currentPlaylist);
-    if ($data === null || !isset($data['mainPlaylist']) || !is_array($data['mainPlaylist'])) return "";
+    if ($data === null || !isset($data['mainPlaylist']) || !is_array($data['mainPlaylist'])) return $none;
+    if (!empty($data['random'])) return array('name' => '', 'exact' => true);
 
     $items = array_values($data['mainPlaylist']);
     $count = count($items);
@@ -558,15 +707,15 @@ function getNextScheduledSequence($fppStatus, $currentlyPlaying, $remotePlaylist
             // Wrap to start if at end
             $nextItem = $items[($i + 1) % $count];
             if (isset($nextItem['sequenceName'])) {
-                return pathinfo($nextItem['sequenceName'], PATHINFO_FILENAME);
+                return array('name' => pathinfo($nextItem['sequenceName'], PATHINFO_FILENAME), 'exact' => false);
             }
             if (isset($nextItem['mediaName'])) {
-                return pathinfo($nextItem['mediaName'], PATHINFO_FILENAME);
+                return array('name' => pathinfo($nextItem['mediaName'], PATHINFO_FILENAME), 'exact' => false);
             }
-            return "";
+            return $none;
         }
     }
-    return "";
+    return $none;
 }
 
 // ============================================================
@@ -575,6 +724,7 @@ function getNextScheduledSequence($fppStatus, $currentlyPlaying, $remotePlaylist
 
 $lastPlayingReported = "";
 $lastNextReported = "";
+$lastNextExact = false;
 $lastQueuedAt = 0;
 $lastWasRemote = false;       // Tracks previous loop's $playingFromRemote value
 // Pending queue: array of ['name' => sequenceName, 'idx' => playlistIndex]
@@ -659,6 +809,7 @@ while (true) {
             ofReportNext('');
             $lastPlayingReported = '';
             $lastNextReported = '';
+            $lastNextExact = false;
             $pendingQueue = array();
             $sequencesClearedWhenIdle = true;
             $lastQueuedAt = 0;
@@ -752,11 +903,12 @@ while (true) {
         ofReportPosition($currentlyPlaying, $livePos);
     }
 
-    $nextScheduled = getNextScheduledSequence($fppStatus, $currentlyPlaying, $cfg['remotePlaylist']);
-    if ($nextScheduled !== $lastNextReported) {
+    $next = getNextScheduledSequence($fppStatus, $currentlyPlaying, $cfg['remotePlaylist']);
+    if ($next['name'] !== $lastNextReported || $next['exact'] !== $lastNextExact) {
         // Always report — including empty string, so server clears its value
-        ofReportNext($nextScheduled);
-        $lastNextReported = $nextScheduled;
+        ofReportNext($next['name'], $next['exact']);
+        $lastNextReported = $next['name'];
+        $lastNextExact = $next['exact'];
     }
 
     // Check whether we should queue a viewer-selected sequence
