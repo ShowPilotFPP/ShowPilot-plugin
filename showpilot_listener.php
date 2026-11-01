@@ -135,8 +135,10 @@ function ofHttp($method, $path, $body = null) {
 }
 
 // Get consolidated state from ShowPilot (mode, winning vote, next queued request)
-function ofGetState() {
-    return ofHttp('GET', '/api/plugin/state');
+// $peek: only the mode is wanted, so ask ShowPilot (v0.33.249+) not to hand
+// anything out. Older servers ignore it and answer in full, as before.
+function ofGetState($peek = false) {
+    return ofHttp('GET', '/api/plugin/state' . ($peek ? '?peek=1' : ''));
 }
 
 // Tell ShowPilot what's currently playing
@@ -941,7 +943,10 @@ while (true) {
     // need to fetch state for a queue decision anyway. Cache vars are
     // declared in outer scope (above the while loop).
     if ($cachedMode === null || (time() - $cachedModeAt) > 60) {
-        $modeState = ofGetState();
+        // peek: this check only reads the mode. Without it, ShowPilot handed
+        // the next request to this call and the request was lost (FPP skipped
+        // the first of several quick requests, ShowPilot GitHub #37).
+        $modeState = ofGetState(true);
         if ($modeState !== null && isset($modeState->mode)) {
             $cachedMode = $modeState->mode;
             $cachedModeAt = time();
