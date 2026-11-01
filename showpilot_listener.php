@@ -757,6 +757,11 @@ $lastUnresolvedAt = 0;
 // don't round-trip on every loop iteration just to know voting vs jukebox.
 $cachedMode = null;
 $cachedModeAt = 0;
+// True once ShowPilot answers the mode check with peek (v0.33.249+). Those
+// servers hand out one request at a time and repeat it until it starts, so
+// each request is inserted on its own and the "ShowPilot Queue" playlist
+// isn't used (see the queue decision below).
+$serverOneAtATime = false;
 
 // On startup: repair any playlists left edited by pre-0.14 versions, then
 // publish the current cooldown state for the C++ hook.
@@ -950,6 +955,12 @@ while (true) {
         if ($modeState !== null && isset($modeState->mode)) {
             $cachedMode = $modeState->mode;
             $cachedModeAt = time();
+            $oneAtATime = !empty($modeState->peek);
+            if ($oneAtATime !== $serverOneAtATime) {
+                logEntry_verbose($oneAtATime ? "ShowPilot hands out one request at a time; inserting each on its own"
+                                             : "Older ShowPilot server; using the ShowPilot Queue playlist for several requests");
+                $serverOneAtATime = $oneAtATime;
+            }
         }
     }
     $isVotingMode = ($cachedMode === 'VOTING');
@@ -1022,6 +1033,7 @@ while (true) {
             $nextSeq = null;
             $nextIdx = null;
             $raceInterrupt = false; // overridden inside RACE block if applicable
+            $isJukeboxRequest = false;
 
             if (isset($state->mode) && $state->mode === 'VOTING' && isset($state->winningVote)) {
                 $nextSeq = $state->winningVote->sequence ?? null;
@@ -1030,7 +1042,8 @@ while (true) {
             } elseif (isset($state->mode) && $state->mode === 'JUKEBOX' && isset($state->nextRequest)) {
                 $nextSeq = $state->nextRequest->sequence ?? null;
                 $nextIdx = $state->nextRequest->playlistIndex ?? null;
-                if ($nextSeq) logEntry("Jukebox: next request is $nextSeq (index $nextIdx)");
+                $isJukeboxRequest = true;
+                if ($nextSeq) logEntry_verbose("Jukebox: next request is $nextSeq (index $nextIdx)");
             } elseif (isset($state->mode) && $state->mode === 'RACE') {
                 // Race mode (v0.13.58+)
                 // When a winner is decided, queue it immediately regardless of
@@ -1070,7 +1083,34 @@ while (true) {
                 }
             }
 
-            if ($nextSeq !== null && $nextIdx !== null) {
+            if ($nextSeq !== null && $nextIdx !== null && $serverOneAtATime && $isJukeboxRequest) {
+                // ShowPilot v0.33.249+: it repeats the request it handed out
+                // until it starts, and hands out the next one only after that.
+                // So insert each one on its own, straight from the Remote
+                // Playlist, and remember just that one (to ignore the repeats).
+                // The ShowPilot Queue playlist isn't used: inserting it while
+                // FPP was already playing from it nested the two, and when the
+                // inner one ended FPP resumed the outer one and played songs
+                // again (ShowPilot GitHub #37). A leftover entry in the pending
+                // list also slipped old songs back into that playlist.
+                $already = (count($pendingQueue) === 1 && $pendingQueue[0]['name'] === $nextSeq);
+                if (!$already) {
+                    $pendingQueue = array(['name' => $nextSeq, 'idx' => intval($nextIdx)]);
+                    $lastQueuedAt = time();
+                    $fppPos = sp_fpp_insert_position($cfg['remotePlaylist'], $nextIdx);
+                    if (!$playingFromRemote && $effectiveInterrupt) {
+                        logEntry("Interrupting schedule with: $nextSeq at playlist index $nextIdx"
+                            . ($fppPos !== intval($nextIdx) ? " (FPP position $fppPos after the lead-in)" : ""));
+                        insertPlaylistImmediate($cfg['remotePlaylist'], $fppPos);
+                    } else {
+                        logEntry("Queuing (request queued): $nextSeq at index $nextIdx"
+                            . ($fppPos !== intval($nextIdx) ? " (FPP position $fppPos after the lead-in)" : ""));
+                        insertPlaylistAfterCurrent($cfg['remotePlaylist'], $fppPos);
+                    }
+                } else {
+                    logEntry_verbose("'$nextSeq' already queued, waiting for it to start");
+                }
+            } elseif ($nextSeq !== null && $nextIdx !== null) {
                 // Check if this song is already in our pending queue (shouldn't
                 // happen since ShowPilot pops on handoff, but be safe)
                 $alreadyPending = false;
