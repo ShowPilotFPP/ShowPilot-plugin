@@ -83,12 +83,15 @@ The plugin exposes several commands you can schedule via FPP's command preset/sc
 | ShowPilot - Switch to Voting Mode | Forces voting mode |
 | ShowPilot - Switch to Jukebox Mode | Forces jukebox mode |
 | ShowPilot - Switch to Race Mode | Forces race mode |
+| ShowPilot - Switch to Listen Only Mode | Viewers still see what's playing and can listen on their phones, but can't vote or request (needs ShowPilot v0.33.249+) |
 | ShowPilot - Restart Listener | Reloads plugin config |
 | ShowPilot - Stop Listener | Stops the listener (turns plugin off) |
 | ShowPilot - Turn Interrupt Schedule On | Force-on the "interrupt schedule" plugin setting |
 | ShowPilot - Turn Interrupt Schedule Off | Force-off the same |
+| ShowPilot - Enable Category / Disable Category | Switches a ShowPilot category on or off (needs ShowPilot v0.33.249+) |
+| ShowPilot - Clear Queue | Empties ShowPilot's request queue (needs ShowPilot v0.33.249+) |
 
-A typical setup: schedule "Turn Viewer Control On" 30 minutes before showtime, "Turn Viewer Control Off" at end-of-night.
+A typical setup: schedule "Turn Viewer Control On" 30 minutes before showtime, "Clear Queue" and "Switch to Listen Only Mode" a few minutes before the end so the last songs and outro can still be heard on phones, and "Turn Viewer Control Off" at end-of-night.
 
 ## Architecture
 

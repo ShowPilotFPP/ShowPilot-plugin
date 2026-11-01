@@ -25,6 +25,11 @@
     "args": []
   },
   {
+    "name": "ShowPilot - Switch to Listen Only Mode",
+    "script": "set_mode_listen.php",
+    "args": []
+  },
+  {
     "name": "ShowPilot - Restart Listener",
     "script": "restart_listener.php",
     "args": []
@@ -69,5 +74,10 @@
         "help": "The category to switch off, spelled as in ShowPilot's Categories list (capitals don't matter). Needs ShowPilot v0.33.249 or newer."
       }
     ]
+  },
+  {
+    "name": "ShowPilot - Clear Queue",
+    "script": "clear_queue.php",
+    "args": []
   }
 ]
