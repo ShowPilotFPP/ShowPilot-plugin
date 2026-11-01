@@ -522,6 +522,19 @@ function insertPlaylistAfterCurrent($playlistName, $startIndex, $endIndex = null
     @file_get_contents($url, false, $context);
 }
 
+// FPP numbers a playlist's items across all three sections: lead-in first,
+// then the main playlist, then lead-out. ShowPilot's playlistIndex is the
+// position inside mainPlaylist only (what Sync Now sends and what
+// resolveRemotePlaylistIndex returns), so an insert into a playlist with a
+// lead-in must skip past the lead-in items or it plays the wrong song
+// (verified against FPP's Playlist::Start, which subtracts m_leadIn.size()).
+// Returns the 1-based position FPP's Insert Playlist commands expect.
+function sp_fpp_insert_position($playlistName, $mainIndex) {
+    $data = sp_read_playlist($playlistName);
+    $leadIn = ($data !== null && isset($data['leadIn']) && is_array($data['leadIn'])) ? count($data['leadIn']) : 0;
+    return intval($mainIndex) + $leadIn;
+}
+
 function insertPlaylistImmediate($playlistName, $playlistIndex) {
     $playlist = rawurlencode($playlistName);
     $idx = intval($playlistIndex);
@@ -1071,8 +1084,10 @@ while (true) {
 
                     if (!$playingFromRemote && $queueCount === 1 && ($effectiveInterrupt || $raceInterrupt)) {
                         // First request, main playlist playing — interrupt immediately
-                        logEntry("Interrupting schedule with: $nextSeq at playlist index $nextIdx");
-                        insertPlaylistImmediate($cfg['remotePlaylist'], $nextIdx);
+                        $fppPos = sp_fpp_insert_position($cfg['remotePlaylist'], $nextIdx);
+                        logEntry("Interrupting schedule with: $nextSeq at playlist index $nextIdx"
+                            . ($fppPos !== intval($nextIdx) ? " (FPP position $fppPos after the lead-in)" : ""));
+                        insertPlaylistImmediate($cfg['remotePlaylist'], $fppPos);
                     } elseif ($rebuilt && $queueCount > 1) {
                         // Additional requests — insert full queue as a range so
                         // skip works through all pending songs
@@ -1084,8 +1099,10 @@ while (true) {
                     } else {
                         // Fallback: single-song insert into remote playlist
                         $reason = $isVotingMode ? "voting mode" : "request queued";
-                        logEntry("Queuing ($reason): $nextSeq at index $nextIdx");
-                        insertPlaylistAfterCurrent($cfg['remotePlaylist'], intval($nextIdx));
+                        $fppPos = sp_fpp_insert_position($cfg['remotePlaylist'], $nextIdx);
+                        logEntry("Queuing ($reason): $nextSeq at index $nextIdx"
+                            . ($fppPos !== intval($nextIdx) ? " (FPP position $fppPos after the lead-in)" : ""));
+                        insertPlaylistAfterCurrent($cfg['remotePlaylist'], $fppPos);
                     }
                 } else {
                     logEntry_verbose("'$nextSeq' already in pending queue, skipping");
