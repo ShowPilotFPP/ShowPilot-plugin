@@ -90,6 +90,7 @@ The plugin exposes several commands you can schedule via FPP's command preset/sc
 | ShowPilot - Turn Interrupt Schedule Off | Force-off the same |
 | ShowPilot - Enable Category / Disable Category | Switches a ShowPilot category on or off (needs ShowPilot v0.33.249+) |
 | ShowPilot - Clear Queue | Empties ShowPilot's request queue (needs ShowPilot v0.33.249+) |
+| ShowPilot - Set Viewer Page | Makes one of your ShowPilot viewer pages live; pick it from the list (needs ShowPilot v0.33.249+) |
 
 A typical setup: schedule "Turn Viewer Control On" 30 minutes before showtime, "Clear Queue" and "Switch to Listen Only Mode" a few minutes before the end so the last songs and outro can still be heard on phones, and "Turn Viewer Control Off" at end-of-night.
 

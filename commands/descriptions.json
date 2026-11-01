@@ -79,5 +79,19 @@
     "name": "ShowPilot - Clear Queue",
     "script": "clear_queue.php",
     "args": []
+  },
+  {
+    "name": "ShowPilot - Set Viewer Page",
+    "script": "set_viewer_page.php",
+    "args": [
+      {
+        "name": "page",
+        "type": "string",
+        "description": "Viewer page",
+        "optional": false,
+        "contentListUrl": "plugin.php?_menu=content&plugin=showpilot-plugin&page=viewer_pages.php&nopage=1",
+        "help": "The viewer page (template) to make live, as named in ShowPilot's Viewer Page list (capitals don't matter). The list is read from ShowPilot; you can also type a name. Needs ShowPilot v0.33.249 or newer."
+      }
+    ]
   }
 ]

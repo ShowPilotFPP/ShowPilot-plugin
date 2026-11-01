@@ -242,6 +242,36 @@ function sp_clear_queue() {
 
 // Used by the Enable/Disable Category FPP commands (needs ShowPilot
 // v0.33.249+). The name is matched without regard to case.
+// Make a ShowPilot viewer page (template) live by name (ShowPilot v0.33.249+).
+function sp_set_viewer_page($name) {
+    $name = trim((string)$name);
+    $what = "Set viewer page '$name'";
+    if ($name === '') {
+        sp_log("Set viewer page: no page name given — pick one in the command's Viewer page field", 'command');
+        return false;
+    }
+    $r = sp_http(sp_server_url(), sp_get_show_token(), 'POST', '/api/plugin/viewer-page',
+        json_encode(array('name' => $name)));
+    if ($r === null) {
+        sp_log("$what not sent — Server URL or Show Token not configured", 'command');
+        return false;
+    }
+    $ok = $r['status'] >= 200 && $r['status'] < 300;
+    if ($ok) {
+        sp_log("$what: OK", 'command');
+    } elseif ($r['status'] === 404) {
+        $data = json_decode((string)$r['body'], true);
+        if (is_array($data) && isset($data['pages']) && is_array($data['pages'])) {
+            sp_log("$what: no such viewer page on the ShowPilot server (pages: " . implode(', ', $data['pages']) . ')', 'command');
+        } else {
+            sp_log("$what: failed (HTTP 404) — the ShowPilot server may be older than v0.33.249", 'command');
+        }
+    } else {
+        sp_log("$what: failed (HTTP " . $r['status'] . ')', 'command');
+    }
+    return $ok;
+}
+
 function sp_set_category_enabled($name, $enabled) {
     $name = trim((string)$name);
     $what = ($enabled ? 'Enable' : 'Disable') . " category '$name'";
