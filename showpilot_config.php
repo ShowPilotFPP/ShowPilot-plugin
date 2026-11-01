@@ -56,6 +56,21 @@ if ($method !== 'POST') {
 $params = array();
 parse_str(file_get_contents('php://input'), $params);
 
+// Clear log (Status tab). Truncates in place: the listener, the audio daemon
+// and the lifecycle scripts all append (O_APPEND), so they carry on writing
+// at the start of the emptied file.
+if ($action === 'clear_log') {
+    $path = sp_log_file();
+    $fh = @fopen($path, 'c');
+    if ($fh === false) respondJson(500, array('error' => 'Could not open the plugin log'));
+    $ok = flock($fh, LOCK_EX) && ftruncate($fh, 0);
+    flock($fh, LOCK_UN);
+    fclose($fh);
+    if (!$ok) respondJson(500, array('error' => 'Could not clear the plugin log'));
+    sp_log('Log cleared from the plugin page');
+    respondJson(200, array('ok' => true));
+}
+
 if ($action === 'raw') {
     $content = (string)($params['content'] ?? '');
     if (trim($content) === '') {

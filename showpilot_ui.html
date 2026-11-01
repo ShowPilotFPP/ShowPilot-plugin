@@ -241,6 +241,8 @@ function spInputAttrs($pluginName, $key, $expr) {
       <div class="d-flex flex-wrap gap-2">
         <button type="button" class="btn btn-outline-secondary" onclick="tailLog();">Tail Log (50 lines)</button>
         <button type="button" class="btn btn-outline-secondary" onclick="toggleAutoTail();" id="autoTailBtn">Auto-Refresh: Off</button>
+        <button type="button" class="btn btn-outline-danger" onclick="clearLog();">Clear Log</button>
+        <span id="clearLogStatus" class="small align-self-center"></span>
       </div>
       <pre id="logOutput" class="sp-log border rounded p-2 mt-2 mb-0 small bg-body-tertiary"></pre>
     <?php spRowEnd(); ?>
@@ -536,7 +538,10 @@ function spInputAttrs($pluginName, $key, $expr) {
           fileName = item.mediaName || '';
           mediaName = item.mediaName || '';
         }
-        if (!fileName) return;
+        // Every item has a position in FPP's playlist, playable or not (a
+        // pause, a command...), so count it either way. This matches the
+        // listener's readFppPlaylistSequences().
+        if (!fileName) { playlistIndex++; return; }
         const name = fileName.replace(/\.[^.]+$/, '');
         const idx = sequences.length;
         sequences.push({
@@ -1054,6 +1059,27 @@ function spInputAttrs($pluginName, $key, $expr) {
       out.scrollTop = out.scrollHeight;
     } catch (err) {
       out.textContent = '(error: ' + err.message + ')';
+    }
+  }
+
+  async function clearLog() {
+    if (!confirm('Clear the ShowPilot plugin log?\nEverything in it will be deleted. This cannot be undone.')) return;
+    setStatus('clearLogStatus', 'Clearing…', 'muted');
+    try {
+      const res = await fetch(pluginPageUrl('showpilot_config.php') + '&action=clear_log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: '',
+      });
+      if (!res.ok) {
+        let msg = 'HTTP ' + res.status;
+        try { msg = (await res.json()).error || msg; } catch (e) {}
+        throw new Error(msg);
+      }
+      setStatus('clearLogStatus', '✓ Log cleared', 'success');
+      tailLog();
+    } catch (err) {
+      setStatus('clearLogStatus', '✗ ' + err.message, 'error');
     }
   }
 
