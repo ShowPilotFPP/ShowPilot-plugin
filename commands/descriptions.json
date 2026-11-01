@@ -43,5 +43,31 @@
     "name": "ShowPilot - Turn Interrupt Schedule Off",
     "script": "interrupt_off.php",
     "args": []
+  },
+  {
+    "name": "ShowPilot - Enable Category",
+    "script": "category_enable.php",
+    "args": [
+      {
+        "name": "category",
+        "type": "string",
+        "description": "Category",
+        "optional": false,
+        "help": "The category to switch on, spelled as in ShowPilot's Categories list (capitals don't matter). Needs ShowPilot v0.33.249 or newer."
+      }
+    ]
+  },
+  {
+    "name": "ShowPilot - Disable Category",
+    "script": "category_disable.php",
+    "args": [
+      {
+        "name": "category",
+        "type": "string",
+        "description": "Category",
+        "optional": false,
+        "help": "The category to switch off, spelled as in ShowPilot's Categories list (capitals don't matter). Needs ShowPilot v0.33.249 or newer."
+      }
+    ]
   }
 ]

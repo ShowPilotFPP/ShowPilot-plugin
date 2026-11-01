@@ -218,6 +218,39 @@ function sp_set_viewer_mode($mode) {
     return $ok;
 }
 
+// Used by the Enable/Disable Category FPP commands (needs ShowPilot
+// v0.33.249+). The name is matched without regard to case.
+function sp_set_category_enabled($name, $enabled) {
+    $name = trim((string)$name);
+    $what = ($enabled ? 'Enable' : 'Disable') . " category '$name'";
+    if ($name === '') {
+        sp_log("$what: no category name given — set it in the command's Category field", 'command');
+        return false;
+    }
+    $r = sp_http(sp_server_url(), sp_get_show_token(), 'POST', '/api/plugin/category',
+        json_encode(array('name' => $name, 'enabled' => (bool)$enabled)));
+    if ($r === null) {
+        sp_log("$what not sent — Server URL or Show Token not configured", 'command');
+        return false;
+    }
+    $ok = $r['status'] >= 200 && $r['status'] < 300;
+    if ($ok) {
+        sp_log("$what: OK", 'command');
+    } elseif ($r['status'] === 404) {
+        $data = json_decode((string)$r['body'], true);
+        if (is_array($data) && isset($data['categories']) && is_array($data['categories'])) {
+            $known = $data['categories'];
+            sp_log("$what: no such category on the ShowPilot server"
+                . (count($known) ? ' (categories: ' . implode(', ', $known) . ')' : ' (it has no categories yet)'), 'command');
+        } else {
+            sp_log("$what: failed (HTTP 404) — the ShowPilot server may be older than v0.33.249", 'command');
+        }
+    } else {
+        sp_log("$what: failed (HTTP " . $r['status'] . ')', 'command');
+    }
+    return $ok;
+}
+
 // ------------------------------------------------------------
 // FPP playlists
 // ------------------------------------------------------------
