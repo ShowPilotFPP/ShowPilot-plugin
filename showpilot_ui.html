@@ -242,6 +242,10 @@ function spInputAttrs($pluginName, $key, $expr) {
         <button type="button" class="btn btn-outline-secondary" onclick="tailLog();">Tail Log (50 lines)</button>
         <button type="button" class="btn btn-outline-secondary" onclick="toggleAutoTail();" id="autoTailBtn">Auto-Refresh: Off</button>
         <button type="button" class="btn btn-outline-danger" onclick="clearLog();">Clear Log</button>
+        <div class="form-check align-self-center mb-0">
+          <input class="form-check-input" type="checkbox" id="logHidePlayed" onchange="onLogFilterChange(this.checked);">
+          <label class="form-check-label small" for="logHidePlayed">Hide "Now playing" lines</label>
+        </div>
         <span id="clearLogStatus" class="small align-self-center"></span>
       </div>
       <pre id="logOutput" class="sp-log border rounded p-2 mt-2 mb-0 small bg-body-tertiary"></pre>
@@ -1047,15 +1051,38 @@ function spInputAttrs($pluginName, $key, $expr) {
   // ============================================================
   let autoTailTimer = null;
 
+  // "Hide Now playing lines" (remembered in this browser): a song change
+  // writes one line each, which buries everything else during a show. With
+  // the filter on, read more of the file so 50 other lines still show.
+  function logHidePlayed() {
+    try { return localStorage.getItem('sp_log_hide_played') === '1'; } catch (e) { return false; }
+  }
+  function onLogFilterChange(on) {
+    try { localStorage.setItem('sp_log_hide_played', on ? '1' : '0'); } catch (e) {}
+    tailLog();
+  }
+  function initLogFilterBox() {
+    const box = document.getElementById('logHidePlayed');
+    if (box) box.checked = logHidePlayed();
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initLogFilterBox);
+  else initLogFilterBox();
+
   async function tailLog() {
     const out = document.getElementById('logOutput');
+    const hide = logHidePlayed();
     try {
-      const res = await fetch('/api/file/Logs/' + encodeURIComponent(SHOWPILOT_LOG_FILE) + '?tail=50');
+      const res = await fetch('/api/file/Logs/' + encodeURIComponent(SHOWPILOT_LOG_FILE) + '?tail=' + (hide ? 500 : 50));
       if (!res.ok) {
         out.textContent = '(failed to load: HTTP ' + res.status + ')';
         return;
       }
-      out.textContent = await res.text();
+      let text = await res.text();
+      if (hide) {
+        const kept = text.split('\n').filter(function (l) { return !/\] Now playing: /.test(l); });
+        text = kept.slice(-51).join('\n');
+      }
+      out.textContent = text;
       out.scrollTop = out.scrollHeight;
     } catch (err) {
       out.textContent = '(error: ' + err.message + ')';
