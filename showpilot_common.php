@@ -214,7 +214,29 @@ function sp_set_viewer_mode($mode) {
         return false;
     }
     $ok = $r['status'] >= 200 && $r['status'] < 300;
-    sp_log("Viewer mode $mode: " . ($ok ? 'OK' : 'failed (HTTP ' . $r['status'] . ')'), 'command');
+    $hint = (!$ok && $mode === 'LISTEN' && $r['status'] === 400) ? ' — Listen Only needs ShowPilot v0.33.249 or newer' : '';
+    sp_log("Viewer mode $mode: " . ($ok ? 'OK' : 'failed (HTTP ' . $r['status'] . ')' . $hint), 'command');
+    return $ok;
+}
+
+// Used by the Clear Queue FPP command (needs ShowPilot v0.33.249+): empties
+// ShowPilot's request queue, like Clear Queue on its Queue page.
+function sp_clear_queue() {
+    $r = sp_http(sp_server_url(), sp_get_show_token(), 'POST', '/api/plugin/queue/clear', '{}');
+    if ($r === null) {
+        sp_log('Clear queue not sent — Server URL or Show Token not configured', 'command');
+        return false;
+    }
+    $ok = $r['status'] >= 200 && $r['status'] < 300;
+    if ($ok) {
+        $data = json_decode((string)$r['body'], true);
+        $n = (is_array($data) && isset($data['cleared'])) ? (int)$data['cleared'] : null;
+        sp_log('Clear queue: OK' . ($n === null ? '' : " ($n request" . ($n === 1 ? '' : 's') . ' removed)'), 'command');
+    } elseif ($r['status'] === 404) {
+        sp_log('Clear queue: failed (HTTP 404) — the ShowPilot server may be older than v0.33.249', 'command');
+    } else {
+        sp_log('Clear queue: failed (HTTP ' . $r['status'] . ')', 'command');
+    }
     return $ok;
 }
 
