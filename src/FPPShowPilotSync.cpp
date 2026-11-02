@@ -43,6 +43,14 @@
  * Same code path on every supported FPP version. The trade-off is that
  * FPP has already started the cooled item when the jump lands, so it is
  * cut after a few milliseconds rather than never starting at all.
+ *
+ * Update notice (v0.14.22+):
+ *
+ * When the ShowPilot server says a newer plugin is out, the listener writes
+ * <media>/config/showpilot-update.json: { "message": "..." }. A small thread
+ * here checks that file once a minute and shows the message as an FPP
+ * warning (the banner at the top of every FPP page) with a button to the
+ * Plugin Manager; when the file is gone the warning is removed.
  */
 
 #include "fpp-pch.h"
@@ -61,13 +69,16 @@
 #include <ctime>
 #include <set>
 #include <thread>
+#include <chrono>
 
 #include "Plugin.h"
 #include "MultiSync.h"
 #include "Player.h"
+#include "Warnings.h"
 
 #define SHOWPILOT_FIFO_PATH "/tmp/SHOWPILOT_FIFO"
 #define SHOWPILOT_COOLDOWN_FILE "/showpilot-cooldown-active.json"
+#define SHOWPILOT_UPDATE_FILE "/showpilot-update.json"
 
 // FPP_DIR_CONFIG resolves the real media dir on every current image; keep a
 // literal fallback so the plugin still builds against any tree lacking it.
@@ -76,6 +87,14 @@ static std::string ShowPilotCooldownPath() {
     return FPP_DIR_CONFIG(SHOWPILOT_COOLDOWN_FILE);
 #else
     return std::string("/home/fpp/media/config") + SHOWPILOT_COOLDOWN_FILE;
+#endif
+}
+
+static std::string ShowPilotUpdatePath() {
+#ifdef FPP_DIR_CONFIG
+    return FPP_DIR_CONFIG(SHOWPILOT_UPDATE_FILE);
+#else
+    return std::string("/home/fpp/media/config") + SHOWPILOT_UPDATE_FILE;
 #endif
 }
 
@@ -95,6 +114,7 @@ public:
         }
         m_worker = std::thread(&ShowPilotPlugin::cooldownWorker, this);
         LogInfo(VB_PLUGIN, "ShowPilot: cooldown playlist hook active\n");
+        m_updateWorker = std::thread(&ShowPilotPlugin::updateNoticeWorker, this);
     }
 
     virtual ~ShowPilotPlugin()
@@ -104,7 +124,14 @@ public:
             m_stopWorker = true;
         }
         m_jobCv.notify_all();
+        {
+            std::lock_guard<std::mutex> lk(m_updateMutex);
+            m_stopUpdate = true;
+        }
+        m_updateCv.notify_all();
         if (m_worker.joinable()) m_worker.join();
+        if (m_updateWorker.joinable()) m_updateWorker.join();
+        setUpdateWarning("");
         MultiSync::INSTANCE.removeMultiSyncPlugin(this);
         std::lock_guard<std::mutex> lock(m_mutex);
         if (m_fd >= 0) { close(m_fd); m_fd = -1; }
@@ -166,6 +193,59 @@ private:
         std::string cooledName;
         std::string targetName;
     };
+    // ---- Update notice (v0.14.22+) -------------------------------------
+    std::thread m_updateWorker;
+    std::mutex m_updateMutex;
+    std::condition_variable m_updateCv;
+    bool m_stopUpdate = false;
+    std::string m_updateShown;   // message currently shown in FPP, "" for none
+
+    // Plain text only: FPP puts warning text into the page as HTML.
+    static std::string plainText(const std::string &in)
+    {
+        std::string out;
+        for (char c : in) {
+            if (c == '<' || c == '>' || c == '&' || c == '"' || c == '\'' || (unsigned char)c < 0x20) continue;
+            out += c;
+            if (out.size() >= 300) break;
+        }
+        return out;
+    }
+
+    static std::string readUpdateMessage()
+    {
+        std::string path = ShowPilotUpdatePath();
+        if (access(path.c_str(), R_OK) != 0) return "";
+        Json::Value root;
+        if (!LoadJsonFromFile(path, root) || !root.isObject()) return "";
+        const Json::Value &m = root["message"];
+        return m.isString() ? plainText(m.asString()) : "";
+    }
+
+    void setUpdateWarning(const std::string &msg)
+    {
+        if (msg == m_updateShown) return;
+        if (!m_updateShown.empty()) WarningHolder::RemoveWarning(0, m_updateShown);
+        m_updateShown = msg;
+        if (!msg.empty()) {
+            WarningHolder::AddWarning(0, msg, "plugins.php", "Plugin Manager");
+            LogInfo(VB_PLUGIN, "ShowPilot: update notice shown: %s\n", msg.c_str());
+        }
+    }
+
+    void updateNoticeWorker()
+    {
+        while (true) {
+            try {
+                setUpdateWarning(readUpdateMessage());
+            } catch (...) {
+                LogWarn(VB_PLUGIN, "ShowPilot: update notice error (ignored)\n");
+            }
+            std::unique_lock<std::mutex> lk(m_updateMutex);
+            if (m_updateCv.wait_for(lk, std::chrono::seconds(60), [this] { return m_stopUpdate; })) return;
+        }
+    }
+
     std::thread m_worker;
     std::mutex m_jobMutex;
     std::condition_variable m_jobCv;

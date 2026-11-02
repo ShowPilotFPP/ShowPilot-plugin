@@ -50,6 +50,23 @@ function spInputAttrs($pluginName, $key, $expr) {
   </div>
 
   <?php
+  // v0.14.22: update notice, written by the listener from what the ShowPilot
+  // server says (see sp_update_notice() in showpilot_listener.php).
+  $spUpdate = null;
+  $spUpdateRaw = @file_get_contents($settings['configDirectory'] . '/showpilot-update.json');
+  if ($spUpdateRaw !== false) {
+    $spUpdateJson = json_decode($spUpdateRaw, true);
+    if (is_array($spUpdateJson) && !empty($spUpdateJson['message']) && is_string($spUpdateJson['message'])) $spUpdate = $spUpdateJson;
+  }
+  if ($spUpdate !== null):
+    $spUpdateOld = !empty($spUpdate['required']) && version_compare($pluginVersion, (string)$spUpdate['required'], '<'); ?>
+    <div class="alert <?php echo $spUpdateOld ? 'alert-danger' : 'alert-warning'; ?> d-flex flex-wrap align-items-center gap-2" role="alert">
+      <span><?php echo htmlspecialchars($spUpdate['message']); ?></span>
+      <a class="alert-link ms-auto" href="plugins.php">Open Plugin Manager</a>
+    </div>
+  <?php endif; ?>
+
+  <?php
   // v0.14.3: ShowPilot supports FPP 10+ only (pluginInfo.json). FPP 9 and
   // older ignore pluginInfo.json when updating (plain git pull), so existing
   // installs there keep receiving untested updates — tell the operator.

@@ -185,9 +185,63 @@ function ofReportNext($sequenceName, $exact = false) {
 // Heartbeat
 function ofHeartbeat() {
     global $PLUGIN_VERSION;
-    return ofHttp('POST', '/api/plugin/heartbeat', array(
+    $resp = ofHttp('POST', '/api/plugin/heartbeat', array(
         'pluginVersion' => $PLUGIN_VERSION,
     ));
+    if ($resp !== null) sp_update_notice($resp);
+    return $resp;
+}
+
+// Update notice (v0.14.22+). ShowPilot (v0.33.249-beta.18+) answers the
+// heartbeat with the newest plugin version (pluginLatest) and the oldest one
+// it works properly with (pluginRequired). When this plugin is older, write
+// <config>/showpilot-update.json; the fppd part of the plugin shows its
+// message as an FPP warning (banner on every FPP page) and this plugin's
+// page shows it too. Up to date, or an older server that doesn't say:
+// the file is removed and the warning goes away.
+function sp_update_notice($resp) {
+    global $PLUGIN_VERSION, $settings;
+    $file = $settings['configDirectory'] . '/showpilot-update.json';
+    $ver = function ($v) {
+        return (is_string($v) && preg_match('/^\d+\.\d+\.\d+$/', $v)) ? $v : null;
+    };
+    $latest = $ver(isset($resp->pluginLatest) ? $resp->pluginLatest : null);
+    $required = $ver(isset($resp->pluginRequired) ? $resp->pluginRequired : null);
+    $message = '';
+    if ($required !== null && version_compare($PLUGIN_VERSION, $required, '<')) {
+        $message = 'ShowPilot plugin v' . $PLUGIN_VERSION . ' is too old for your ShowPilot server, which needs v' . $required
+            . ' or newer (newest: v' . ($latest !== null ? $latest : $required) . '). Update it in the Plugin Manager.';
+    } elseif ($latest !== null && version_compare($PLUGIN_VERSION, $latest, '<')) {
+        $message = 'A ShowPilot plugin update is available: v' . $latest . ' (installed: v' . $PLUGIN_VERSION . '). Update it in the Plugin Manager.';
+    }
+    $current = @file_get_contents($file);
+    $currentMsg = '';
+    if ($current !== false) {
+        $j = json_decode($current, true);
+        if (is_array($j) && isset($j['message']) && is_string($j['message'])) $currentMsg = $j['message'];
+    }
+    if ($message === '') {
+        if ($current !== false) {
+            @unlink($file);
+            logEntry("[update] plugin is up to date; update notice removed");
+        }
+        return;
+    }
+    if ($message === $currentMsg) return;
+    $tmp = $file . '.tmp';
+    $json = json_encode(array('message' => $message, 'installed' => $PLUGIN_VERSION, 'latest' => $latest, 'required' => $required), JSON_PRETTY_PRINT);
+    if (@file_put_contents($tmp, $json) === false) {
+        logEntry("[update] ERROR: could not write $tmp");
+        return;
+    }
+    // World-readable: fppd reads it and may run as a different user.
+    @chmod($tmp, 0644);
+    if (!@rename($tmp, $file)) {
+        @unlink($tmp);
+        logEntry("[update] ERROR: could not update $file");
+        return;
+    }
+    logEntry("[update] " . $message);
 }
 
 // Push full sequence list for the configured playlist

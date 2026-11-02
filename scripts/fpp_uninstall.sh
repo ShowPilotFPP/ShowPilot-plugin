@@ -15,6 +15,7 @@ remove_legacy_csp_origin
 # file is removed too; it only mattered while that version was installed.
 rm -f "${MEDIADIR}/config/showpilot-cooldown-active.json" "${MEDIADIR}/config/showpilot-cooldown-active.json.tmp"
 rm -f "${MEDIADIR}/config/showpilot-cooldowns.json"
+rm -f "${MEDIADIR}/config/showpilot-update.json" "${MEDIADIR}/config/showpilot-update.json.tmp"
 
 # Settings (config/plugin.showpilot) and the show token
 # (plugindata/<repoName>/showToken) are kept on purpose so a reinstall picks
