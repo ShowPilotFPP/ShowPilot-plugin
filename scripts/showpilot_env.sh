@@ -118,7 +118,7 @@ start_listener() {
 # pointed the plugin at a ShowPilot server (FPP guideline §14.13).
 start_audio_daemon() {
     if [ -z "$(config_value serverUrl)" ]; then
-        plugin_log "Audio daemon not started: no Server URL configured yet"
+        plugin_log "Audio daemon not started: no ShowPilot Server URL configured yet"
         return 0
     fi
     if ! node_ok; then

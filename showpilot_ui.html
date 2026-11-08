@@ -94,7 +94,7 @@ function spInputAttrs($pluginName, $key, $expr) {
   <!-- ========== Server ========== -->
   <div class="sp-pane" data-tab-pane="server">
     <div class="alert alert-warning d-flex flex-wrap align-items-center justify-content-between gap-2">
-      <div>Changes to <em>Server URL</em> or <em>Show Token</em> take effect after the listener restarts.</div>
+      <div>Changes to <em>ShowPilot Server URL</em> or <em>Show Token</em> take effect after the listener restarts.</div>
       <div class="d-flex align-items-center gap-2">
         <button type="button" class="btn btn-primary btn-sm" onclick="restartListener();">Restart Listener</button>
         <span id="restartStatusServer" class="small"></span>
@@ -112,17 +112,18 @@ function spInputAttrs($pluginName, $key, $expr) {
       </select>
     <?php spRowEnd(); ?>
 
-    <?php spRowStart('Server URL', 'serverUrl',
-      'Where your self-hosted ShowPilot server is reachable, e.g. <code>http://192.168.1.230:3100</code> or
-       <code>https://lights.yourdomain.com</code>. No trailing slash. Use <code>https://</code> for any server
-       outside your home network — the show token is sent with every request.'); ?>
+    <?php spRowStart('ShowPilot Server URL', 'serverUrl',
+      'The address of your ShowPilot server. Self-hosted: where it\'s reachable, e.g. <code>http://192.168.1.230:3100</code> or
+       <code>https://lights.yourdomain.com</code>. Hosted: the ShowPilot Server URL your host shows you. No trailing slash.
+       Use <code>https://</code> for any server outside your home network — the show token is sent with every request.'); ?>
       <input type="text" class="form-control" id="serverUrl" autocomplete="off"
         value="<?php echo htmlspecialchars(val($pluginSettings, 'serverUrl')); ?>"
         <?php echo spInputAttrs($pluginName, 'serverUrl', 'this.value'); ?> />
     <?php spRowEnd(); ?>
 
     <?php spRowStart('Show Token', 'showToken',
-      'Copy this from your ShowPilot admin dashboard ("Show Token (for ShowPilot Plugin)" section).
+      'Copy this from your ShowPilot admin\'s <strong>Plugin</strong> page ("Show Token (for ShowPilot Plugin)"), or for a
+       hosted ShowPilot, from your host\'s dashboard next to the ShowPilot Server URL.
        It is stored on this FPP, readable only by the plugin, and is not shown again after saving.'); ?>
       <input type="password" class="form-control" id="showToken" autocomplete="new-password"
         value="<?php echo $hasShowToken ? SP_TOKEN_MASK : ''; ?>"
@@ -234,7 +235,7 @@ function spInputAttrs($pluginName, $key, $expr) {
     <p class="text-body-secondary">
       The audio daemon runs on this FPP and shares the playing song and its exact position with your ShowPilot
       server, which relays them to every listener's phone so they stay in sync with your speakers. It only starts
-      once a Server URL is saved, and it listens on your local network without a login — don't forward its port
+      once a ShowPilot Server URL is saved, and it listens on your local network without a login — don't forward its port
       to the internet.
     </p>
 
@@ -975,7 +976,7 @@ function spInputAttrs($pluginName, $key, $expr) {
     return serverUrl
       ? 'Not running. Restart FPPD (Status/Control → Restart FPPD) to start the audio daemon; if it still '
         + 'does not start, check the plugin log on the Diagnostics tab.'
-      : 'Not running. The audio daemon starts after you save a Server URL on the Server tab and restart FPPD.';
+      : 'Not running. The audio daemon starts after you save a ShowPilot Server URL on the Server tab and restart FPPD.';
   }
 
   async function checkAudioDaemon() {

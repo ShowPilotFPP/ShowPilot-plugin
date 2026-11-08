@@ -210,7 +210,7 @@ function sp_set_viewer_mode($mode) {
     $r = sp_http(sp_server_url(), sp_get_show_token(), 'POST', '/api/plugin/viewer-mode',
         json_encode(array('mode' => $mode)));
     if ($r === null) {
-        sp_log("Viewer mode $mode not sent — Server URL or Show Token not configured", 'command');
+        sp_log("Viewer mode $mode not sent — ShowPilot Server URL or Show Token not configured", 'command');
         return false;
     }
     $ok = $r['status'] >= 200 && $r['status'] < 300;
@@ -224,7 +224,7 @@ function sp_set_viewer_mode($mode) {
 function sp_clear_queue() {
     $r = sp_http(sp_server_url(), sp_get_show_token(), 'POST', '/api/plugin/queue/clear', '{}');
     if ($r === null) {
-        sp_log('Clear queue not sent — Server URL or Show Token not configured', 'command');
+        sp_log('Clear queue not sent — ShowPilot Server URL or Show Token not configured', 'command');
         return false;
     }
     $ok = $r['status'] >= 200 && $r['status'] < 300;
@@ -253,7 +253,7 @@ function sp_set_viewer_page($name) {
     $r = sp_http(sp_server_url(), sp_get_show_token(), 'POST', '/api/plugin/viewer-page',
         json_encode(array('name' => $name)));
     if ($r === null) {
-        sp_log("$what not sent — Server URL or Show Token not configured", 'command');
+        sp_log("$what not sent — ShowPilot Server URL or Show Token not configured", 'command');
         return false;
     }
     $ok = $r['status'] >= 200 && $r['status'] < 300;
@@ -282,7 +282,7 @@ function sp_set_category_enabled($name, $enabled) {
     $r = sp_http(sp_server_url(), sp_get_show_token(), 'POST', '/api/plugin/category',
         json_encode(array('name' => $name, 'enabled' => (bool)$enabled)));
     if ($r === null) {
-        sp_log("$what not sent — Server URL or Show Token not configured", 'command');
+        sp_log("$what not sent — ShowPilot Server URL or Show Token not configured", 'command');
         return false;
     }
     $ok = $r['status'] >= 200 && $r['status'] < 300;

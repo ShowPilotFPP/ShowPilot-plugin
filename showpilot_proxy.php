@@ -11,7 +11,7 @@ $serverUrl = sp_server_url();
 $showToken = sp_get_show_token();
 if ($serverUrl === '' || $showToken === '') {
     http_response_code(400);
-    echo json_encode(['error' => 'Server URL or Show Token not configured']);
+    echo json_encode(['error' => 'ShowPilot Server URL or Show Token not configured']);
     exit;
 }
 
