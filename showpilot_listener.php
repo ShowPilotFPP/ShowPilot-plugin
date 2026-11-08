@@ -193,6 +193,8 @@ function ofHeartbeat() {
         // Show buttons (ShowPilot v0.33.278-master.12+): older servers don't
         // send the field, so the plugin never asks them for presses.
         sp_show_buttons_set(isset($resp->showButtons) && $resp->showButtons === true);
+        // FPP Monitor (ShowPilot v0.33.278-master.13+): older servers don't ask.
+        sp_fpp_monitor_set(isset($resp->fppMonitor) && $resp->fppMonitor === true);
     }
     return $resp;
 }
@@ -317,6 +319,114 @@ function sp_update_notice($resp) {
         return;
     }
     logEntry("[update] " . $message);
+}
+
+// ============================================================
+// FPP Monitor (v0.14.26+)
+// ============================================================
+// ShowPilot's FPP Monitor page shows this FPP's status and offers a few
+// controls. ShowPilot never connects to FPP; while the heartbeat says
+// fppMonitor, this plugin sends a snapshot of FPP's own status calls:
+//   POST /api/plugin/fpp-status { status, multisync, disk, now, playlists?, presets?, results? }
+// and runs the controls in the answer ({commands: [{id, action, name?}],
+// nextInSec}). ShowPilot asks for a report every 5 s, or every second while
+// someone has the page open. Only the five actions below are ever run;
+// results go back in the next snapshot.
+$fppMonitorWanted = false;
+$fppMonitorNextAt = 0.0;
+$fppMonitorListsAt = 0;
+$fppMonitorResults = array();
+
+function sp_fpp_monitor_set($on) {
+    global $fppMonitorWanted, $fppMonitorNextAt, $fppMonitorListsAt;
+    if ($on === $fppMonitorWanted) return;
+    $fppMonitorWanted = $on;
+    $fppMonitorNextAt = 0.0;
+    $fppMonitorListsAt = 0;
+    logEntry($on ? "[fpp-monitor] ShowPilot asked for FPP status; reporting" : "[fpp-monitor] stopped reporting FPP status");
+}
+
+// GET one of FPP's own API calls on this machine; decoded as arrays, or null.
+function sp_fpp_get_json($path) {
+    $ctx = stream_context_create(array('http' => array('timeout' => 3, 'ignore_errors' => true)));
+    $r = @file_get_contents('http://127.0.0.1' . $path, false, $ctx);
+    if ($r === false) return null;
+    $j = json_decode($r, true);
+    return is_array($j) ? $j : null;
+}
+
+function sp_fpp_monitor_run($c) {
+    $action = (isset($c->action) && is_string($c->action)) ? $c->action : '';
+    $name = (isset($c->name) && is_string($c->name)) ? substr($c->name, 0, 200) : '';
+    switch ($action) {
+        case 'startPlaylist':
+            if ($name === '') return array(false, 'No playlist name');
+            $r = sp_run_fpp_command('Start Playlist', array($name, 'false', 'false'));
+            break;
+        case 'preset':
+            if ($name === '') return array(false, 'No preset name');
+            $r = sp_run_fpp_command('Trigger Command Preset', array($name));
+            break;
+        case 'stopGracefully':
+            $r = sp_run_fpp_command('Stop Gracefully', array());
+            break;
+        case 'stopNow':
+            $r = sp_run_fpp_command('Stop Now', array());
+            break;
+        case 'restartFppd':
+            $ctx = stream_context_create(array('http' => array('timeout' => 10, 'ignore_errors' => true)));
+            $body = @file_get_contents('http://127.0.0.1/api/system/fppd/restart', false, $ctx);
+            $r = array('ok' => $body !== false, 'status' => 0, 'body' => $body === false ? 'FPP did not answer' : '');
+            break;
+        default:
+            logEntry("[fpp-monitor] ignored an unknown control");
+            return array(false, 'This plugin does not know that control');
+    }
+    logEntry("[fpp-monitor] " . $action . ($name !== '' ? " '" . $name . "'" : '') . ($r['ok'] ? ' done' : ' FAILED: ' . $r['body']));
+    return array($r['ok'], $r['ok'] ? '' : ('FPP said: ' . ($r['body'] !== '' ? $r['body'] : 'HTTP ' . $r['status'])));
+}
+
+function sp_fpp_monitor_tick() {
+    global $fppMonitorWanted, $fppMonitorNextAt, $fppMonitorListsAt, $fppMonitorResults, $settings;
+    if (!$fppMonitorWanted || microtime(true) < $fppMonitorNextAt) return;
+    $fppMonitorNextAt = microtime(true) + 5; // until the server says otherwise
+
+    $status = sp_fpp_get_json('/api/system/status');
+    if ($status === null) return; // fppd not answering; try again later
+    $body = array(
+        'source' => 'fpp',
+        'now' => time(),
+        'status' => $status,
+        'multisync' => sp_fpp_get_json('/api/fppd/multiSyncSystems'),
+    );
+    $dir = isset($settings['mediaDirectory']) ? $settings['mediaDirectory'] : '/home/fpp/media';
+    $free = @disk_free_space($dir);
+    $total = @disk_total_space($dir);
+    if ($free !== false && $total) $body['disk'] = array('freeBytes' => $free, 'totalBytes' => $total);
+    if (time() - $fppMonitorListsAt >= 60) {
+        $fppMonitorListsAt = time();
+        $pl = sp_fpp_get_json('/api/playlists');
+        $pr = sp_fpp_get_json('/api/commandPresets?names=true');
+        $body['playlists'] = is_array($pl) ? array_values(array_filter($pl, 'is_string')) : array();
+        $body['presets'] = is_array($pr) ? array_values(array_filter($pr, 'is_string')) : array();
+    }
+    if (count($fppMonitorResults)) $body['results'] = $fppMonitorResults;
+
+    $resp = ofHttp('POST', '/api/plugin/fpp-status', $body);
+    if ($resp === null) return; // keep the results for the next try
+    $fppMonitorResults = array();
+    if (isset($resp->nextInSec) && is_numeric($resp->nextInSec)) {
+        $fppMonitorNextAt = microtime(true) + max(1, min(30, floatval($resp->nextInSec)));
+    }
+    if (isset($resp->commands) && is_array($resp->commands)) {
+        foreach (array_slice($resp->commands, 0, 10) as $c) {
+            $id = (isset($c->id) && is_string($c->id)) ? substr($c->id, 0, 40) : '';
+            list($ok, $msg) = sp_fpp_monitor_run($c);
+            if ($id !== '') $fppMonitorResults[] = array('id' => $id, 'ok' => $ok, 'message' => $msg);
+        }
+        // Report the results (and the new state) right away.
+        if (count($resp->commands)) { $fppMonitorNextAt = 0.0; $fppMonitorListsAt = 0; }
+    }
 }
 
 // Push full sequence list for the configured playlist
@@ -944,6 +1054,8 @@ while (true) {
 
     // Show buttons: run any presses waiting on ShowPilot (only while on).
     sp_show_buttons_tick();
+    // FPP Monitor: send a status snapshot when it's due (only when asked).
+    sp_fpp_monitor_tick();
 
     // Poll FPP
     $fppStatus = getFppStatus();
