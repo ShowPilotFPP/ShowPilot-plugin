@@ -13,7 +13,7 @@ $allowedKeys = array(
     'serverUrl', 'showToken', 'remotePlaylist', 'interruptSchedule',
     'requestFetchTime', 'additionalWaitTime', 'fppStatusCheckTime',
     'heartbeatIntervalSec', 'verboseLogging', 'listenerEnabled',
-    'listenerRestarting', 'audioDaemonPort',
+    'listenerRestarting', 'audioDaemonPort', 'connectionMode',
 );
 
 function respondJson($code, $payload) {
@@ -27,6 +27,8 @@ function validSetting($key, $value) {
     switch ($key) {
         case 'serverUrl':
             return $value === '' || sp_is_valid_server_url(rtrim($value, '/'));
+        case 'connectionMode':
+            return $value === 'self' || $value === 'cloud';
         case 'audioDaemonPort':
             return ctype_digit($value) && (int)$value >= 1024 && (int)$value <= 65535;
         case 'remotePlaylist':

@@ -219,6 +219,25 @@ Same as the other ShowPilot repos:
 
 ---
 
+## Unreleased: Connection setting (branch `cloud-mode`)
+
+Not released — waiting for the season to end and for ShowPilot's link
+endpoint to reach main. Adds **Server → Connection**: *Self-hosted ShowPilot*
+(default, behaviour unchanged) or *ShowPilot Cloud*. In Cloud mode the audio
+daemon (`showpilot_audio.js`, "Cloud link") opens one outbound WebSocket to
+`<Server URL>/api/plugin/link` with the show token and treats it as one more
+client (same position / syncPoint / heartbeat messages; the server pings it
+to measure the round trip). The daemon re-reads the settings file every 30 s
+(local only) so switching modes needs no fppd restart; switching back to
+Self-hosted, or changing URL/token, closes the link. 401/403/404 from the
+server wait 5 minutes before retrying. In Self-hosted mode nothing in the
+link code opens a connection. Settings: `connectionMode` (`self`|`cloud`,
+allow-listed in `showpilot_config.php`); the daemon gets `SP_CONFIG_FILE` /
+`SP_TOKEN_FILE` from `showpilot_env.sh`. Replaces the separate Cloud Link
+fork (same settings key, so switching plugins keeps URL and token). Tested
+against a stand-in server: Self-hosted never connected; Cloud connected with
+the bearer token and relayed messages; switching back closed it within 30 s.
+
 ## Recent version history
 
 | Version | Change |
