@@ -52,6 +52,6 @@
 			}
 		],
 		"closedCode": false,
-		"other": "Visitor votes and requests are received and stored by your ShowPilot server, not on this FPP instance. The show token is kept in plugindata/, readable only by the plugin."
+		"other": "Visitor votes and requests are received and stored by your ShowPilot server, not on this FPP instance. If you turn on Show Buttons in ShowPilot, the plugin runs the FPP effect, command preset or script you chose for a button when a visitor presses it, and nothing else. The show token is kept in plugindata/, readable only by the plugin."
 	}
 }

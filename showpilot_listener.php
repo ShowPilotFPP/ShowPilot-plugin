@@ -188,8 +188,83 @@ function ofHeartbeat() {
     $resp = ofHttp('POST', '/api/plugin/heartbeat', array(
         'pluginVersion' => $PLUGIN_VERSION,
     ));
-    if ($resp !== null) sp_update_notice($resp);
+    if ($resp !== null) {
+        sp_update_notice($resp);
+        // Show buttons (ShowPilot v0.33.278-master.12+): older servers don't
+        // send the field, so the plugin never asks them for presses.
+        sp_show_buttons_set(isset($resp->showButtons) && $resp->showButtons === true);
+    }
     return $resp;
+}
+
+// ============================================================
+// Show buttons (v0.14.25+)
+// ============================================================
+// Visitors press buttons on the viewer page; ShowPilot queues each press and
+// this plugin runs it in FPP. While the heartbeat says buttons are on, every
+// loop tick (about twice a second, also while FPP is idle) asks ShowPilot
+// for waiting presses: GET /api/plugin/show-buttons →
+//   { presses: [ {id, command, args: [..]} ], showButtons: true|false }
+// Only the three commands below are ever run, whatever the server sends, and
+// each runs through FPP's own POST /api/command (JSON, so names with spaces
+// or slashes need no URL encoding).
+$showButtonsWanted = false;
+$SP_SHOW_BUTTON_COMMANDS = array('Effect Start', 'Trigger Command Preset', 'Run Script');
+
+function sp_show_buttons_set($on) {
+    global $showButtonsWanted;
+    if ($on === $showButtonsWanted) return;
+    $showButtonsWanted = $on;
+    logEntry($on ? "[buttons] show buttons are on; checking for presses"
+                 : "[buttons] show buttons are off; stopped checking for presses");
+}
+
+function sp_run_fpp_command($command, $args) {
+    $options = array('http' => array(
+        'method'  => 'POST',
+        'header'  => "Content-Type: application/json\r\n",
+        'content' => json_encode(array('command' => $command, 'args' => $args)),
+        'timeout' => 5,
+        'ignore_errors' => true,
+    ));
+    $result = @file_get_contents('http://127.0.0.1/api/command', false, stream_context_create($options));
+    $status = 0;
+    if (isset($http_response_header) && is_array($http_response_header) && isset($http_response_header[0])
+        && preg_match('#\s(\d{3})\s#', $http_response_header[0], $m)) {
+        $status = intval($m[1]);
+    }
+    return array('ok' => $result !== false && $status >= 200 && $status < 300, 'status' => $status,
+                 'body' => $result === false ? '' : trim(substr($result, 0, 200)));
+}
+
+function sp_show_buttons_tick() {
+    global $showButtonsWanted, $SP_SHOW_BUTTON_COMMANDS;
+    if (!$showButtonsWanted) return;
+    $resp = ofHttp('GET', '/api/plugin/show-buttons');
+    if ($resp === null) return;
+    if (isset($resp->showButtons) && $resp->showButtons === false) sp_show_buttons_set(false);
+    if (!isset($resp->presses) || !is_array($resp->presses)) return;
+    foreach ($resp->presses as $p) {
+        $command = (isset($p->command) && is_string($p->command)) ? $p->command : '';
+        if (!in_array($command, $SP_SHOW_BUTTON_COMMANDS, true)) {
+            logEntry("[buttons] ignored a press with an unsupported command");
+            continue;
+        }
+        $args = array();
+        if (isset($p->args) && is_array($p->args)) {
+            foreach ($p->args as $a) {
+                if (!is_string($a) && !is_int($a) && !is_bool($a)) continue;
+                $args[] = substr(is_bool($a) ? ($a ? 'true' : 'false') : (string)$a, 0, 256);
+            }
+        }
+        if (count($args) === 0 || $args[0] === '') {
+            logEntry("[buttons] ignored a press with no name to run");
+            continue;
+        }
+        $r = sp_run_fpp_command($command, $args);
+        if ($r['ok']) logEntry("[buttons] ran $command: " . $args[0]);
+        else logEntry("[buttons] ERROR: $command '" . $args[0] . "' failed (HTTP " . $r['status'] . "): " . $r['body']);
+    }
 }
 
 // Update notice (v0.14.22+). ShowPilot (v0.33.249-beta.18+) answers the
@@ -866,6 +941,9 @@ while (true) {
         ofHeartbeat();
         $lastHeartbeat = time();
     }
+
+    // Show buttons: run any presses waiting on ShowPilot (only while on).
+    sp_show_buttons_tick();
 
     // Poll FPP
     $fppStatus = getFppStatus();
