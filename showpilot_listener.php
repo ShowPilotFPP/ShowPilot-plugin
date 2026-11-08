@@ -69,7 +69,7 @@ function loadRuntimeSettings() {
     $rawUrl = rtrim(sp_setting($s, 'serverUrl'), '/');
     $serverUrl = sp_server_url($s);
     if ($rawUrl !== '' && $serverUrl === '') {
-        logEntry("WARNING - Server URL '$rawUrl' is not a plain http(s) URL; ignoring it.");
+        logEntry("WARNING - ShowPilot Server URL '$rawUrl' is not a plain http(s) URL; ignoring it.");
     }
     return array(
         'serverUrl'            => $serverUrl,
@@ -90,14 +90,14 @@ if ($cfg === null) {
     exit(1);
 }
 
-logEntry("Server URL: " . $cfg['serverUrl']);
+logEntry("ShowPilot Server URL: " . $cfg['serverUrl']);
 logEntry("Remote Playlist: " . $cfg['remotePlaylist']);
 logEntry("Interrupt Schedule: " . ($cfg['interruptSchedule'] ? 'yes' : 'no'));
 logEntry("Request Fetch Time: " . $cfg['requestFetchTime'] . "s");
 logEntry("FPP Status Check Time: " . $cfg['fppStatusCheckTime'] . "s");
 
 if (empty($cfg['serverUrl']) || empty($cfg['showToken'])) {
-    logEntry("WARNING - Server URL or Show Token is empty. Plugin will idle until configured.");
+    logEntry("WARNING - ShowPilot Server URL or Show Token is empty. Plugin will idle until configured.");
 }
 
 // ============================================================
@@ -118,7 +118,7 @@ function ofHttp($method, $path, $body = null) {
     }
     if ($r['status'] >= 300 && $r['status'] < 400) {
         logEntry("ERROR - ShowPilot server redirected $path (HTTP " . $r['status']
-            . "). Enter the server's final URL (e.g. https://) as the Server URL.");
+            . "). Enter the server's final URL (e.g. https://) as the ShowPilot Server URL.");
         return null;
     }
     if ($r['status'] < 200 || $r['status'] >= 300) {
@@ -850,7 +850,7 @@ while (true) {
         WriteSettingToFile("listenerRestarting", urlencode("false"), SP_SETTINGS_KEY);
         logEntry("Restarting ShowPilot Blackbox v" . $PLUGIN_VERSION);
         $cfg = loadRuntimeSettings() ?? $cfg;
-        logEntry("Server URL: " . $cfg['serverUrl']);
+        logEntry("ShowPilot Server URL: " . $cfg['serverUrl']);
     }
 
     if (!$enabled) {

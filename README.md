@@ -39,7 +39,7 @@ restart prompt, restarting is harmless.
 
 Then open **Content Setup → ShowPilot** and fill in:
 
-- **Server URL**: `http://your-showpilot-server:3100` (no trailing slash; use `https://` for a server outside your home network)
+- **ShowPilot Server URL**: `http://your-showpilot-server:3100` (no trailing slash; use `https://` for a server outside your home network)
 - **Show Token**: copy from your ShowPilot admin page → "Show Token (for ShowPilot Plugin)" section
 - **Remote Playlist**: select the FPP playlist that contains your viewer-controllable sequences
 
@@ -56,10 +56,10 @@ fppd restart.
 - **What leaves this FPP:** only traffic to the ShowPilot server you configure — what is
   playing and its position, the plugin version, your Remote Playlist's song list, and (only
   when you click Sync Now with audio upload checked) those songs' audio. Nothing is sent until
-  a Server URL and Show Token are saved.
+  a ShowPilot Server URL and Show Token are saved.
 - **What listens on your network:** the audio daemon on port 8090 (configurable). It serves
   audio files from FPP's music folder and the current playback position, without a login —
-  don't forward that port to the internet. It only starts once a Server URL is configured.
+  don't forward that port to the internet. It only starts once a ShowPilot Server URL is configured.
 - **What it changes on FPP:** it keeps its own `ShowPilot Queue` playlist for queued requests.
   It never edits your playlists. If you turn on *Also skip cooled-down songs in FPP's normal
   playlist rotation* in ShowPilot, the plugin's FPP component continues your playlist past a
