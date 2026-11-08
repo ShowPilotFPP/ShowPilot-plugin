@@ -101,6 +101,17 @@ function spInputAttrs($pluginName, $key, $expr) {
       </div>
     </div>
 
+    <?php $connMode = val($pluginSettings, 'connectionMode') === 'hosted' ? 'hosted' : 'self'; ?>
+    <?php spRowStart('Connection', 'connectionMode',
+      'Where your ShowPilot runs. <strong>Self-hosted</strong> (most shows): your own ShowPilot server, which connects
+       to this FPP for live song position. <strong>Hosted</strong>: a ShowPilot run for you somewhere else, which can\'t
+       reach this FPP, so the plugin keeps one outbound connection open to it instead.'); ?>
+      <select class="form-select" id="connectionMode" <?php echo spInputAttrs($pluginName, 'connectionMode', 'this.value'); ?>>
+        <option value="self" <?php echo $connMode === 'self' ? 'selected' : ''; ?>>Self-hosted ShowPilot</option>
+        <option value="hosted" <?php echo $connMode === 'hosted' ? 'selected' : ''; ?>>Hosted ShowPilot</option>
+      </select>
+    <?php spRowEnd(); ?>
+
     <?php spRowStart('Server URL', 'serverUrl',
       'Where your self-hosted ShowPilot server is reachable, e.g. <code>http://192.168.1.230:3100</code> or
        <code>https://lights.yourdomain.com</code>. No trailing slash. Use <code>https://</code> for any server

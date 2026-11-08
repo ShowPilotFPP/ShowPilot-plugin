@@ -18,6 +18,8 @@
 //   MEDIA_ROOT  — FPP music dir (default: /home/fpp/media/music)
 //   FPP_HOST    — FPP API base URL (default: http://127.0.0.1)
 //   LOG_FILE    — the plugin's log file (default: stderr)
+//   SP_CONFIG_FILE / SP_TOKEN_FILE — plugin settings + show token, for the
+//                 outbound link used with a hosted ShowPilot (see "Outbound link")
 // ============================================================
 
 'use strict';
@@ -405,6 +407,102 @@ if (WebSocketServer) {
     }
   }, 30000);
 }
+
+// ---- Outbound link (Connection: Hosted ShowPilot) ----
+// A hosted ShowPilot server isn't on this network, so it can't connect to
+// this daemon the way a self-hosted one does. Instead this daemon connects
+// OUT to <Server URL>/api/plugin/link with the show token and is treated as
+// one more WebSocket client: it gets exactly the messages local clients get
+// (position, syncPoint, heartbeat), and answers the server's pings so the
+// server can measure the round trip and correct timestamps for it.
+// Only runs when the plugin's Connection setting is "Hosted ShowPilot"
+// (connectionMode = hosted). With the default, Self-hosted, nothing here ever
+// opens a connection: the settings file is re-read every 30 s (local only)
+// so switching the setting takes effect without restarting fppd. Server URL
+// and token are re-read on every attempt for the same reason.
+const LINK_CONFIG_FILE = process.env.SP_CONFIG_FILE || null;
+const LINK_TOKEN_FILE = process.env.SP_TOKEN_FILE || null;
+const LINK_PATH = '/api/plugin/link';
+let LinkWebSocket = null;
+for (const mod of [path.join(__dirname, 'vendor', 'ws'), 'ws']) {
+  try { LinkWebSocket = require(mod).WebSocket; if (LinkWebSocket) break; } catch (_) {}
+}
+
+function readLinkTarget() {
+  try {
+    const cfg = fs.readFileSync(LINK_CONFIG_FILE, 'utf8');
+    const mode = cfg.match(/^\s*connectionMode\s*=\s*"?([^"\r\n]*)"?\s*$/m);
+    if (!mode || mode[1].trim() !== 'hosted') return null;
+    const m = cfg.match(/^\s*serverUrl\s*=\s*"?([^"\r\n]*)"?\s*$/m);
+    if (!m) return null;
+    let url = m[1].trim();
+    try { url = decodeURIComponent(url); } catch (_) {}
+    url = url.replace(/\/+$/, '');
+    if (!/^https?:\/\/[^\s/]+/i.test(url)) return null;
+    const token = fs.readFileSync(LINK_TOKEN_FILE, 'utf8').trim();
+    return token ? { url, token } : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+let linkTimer = null;
+let linkDelayMs = 2000;
+function scheduleLink(ms) {
+  if (linkTimer) return;
+  linkTimer = setTimeout(() => { linkTimer = null; connectLink(); }, ms);
+}
+
+function connectLink() {
+  const target = readLinkTarget();
+  if (!target) return scheduleLink(30000); // Self-hosted, or not configured yet
+  const wsUrl = target.url.replace(/^http/i, 'ws') + LINK_PATH;
+  let sock;
+  try {
+    sock = new LinkWebSocket(wsUrl, { headers: { Authorization: `Bearer ${target.token}` }, handshakeTimeout: 10000 });
+  } catch (e) {
+    log(`Outbound link: ${e.message}`);
+    return scheduleLink(30000);
+  }
+  let opened = false;
+  sock.on('open', () => {
+    opened = true;
+    linkDelayMs = 2000;
+    wsClients.add(sock);
+    log(`Outbound link connected to ${target.url}`);
+    try { sock.send(JSON.stringify(positionMessage('position'))); } catch (_) {}
+    // Drop the link if the setting goes back to Self-hosted or the server changes.
+    const watch = setInterval(() => {
+      const now = readLinkTarget();
+      if (!now || now.url !== target.url || now.token !== target.token) {
+        clearInterval(watch);
+        log('Outbound link settings changed — closing the link');
+        try { sock.close(); } catch (_) {}
+      }
+    }, 30000);
+    sock.on('close', () => clearInterval(watch));
+  });
+  sock.on('unexpected-response', (req, res) => {
+    const code = res.statusCode;
+    // 401: wrong token. 403: audio is off for this show. 404: the server has
+    // no link endpoint (a self-hosted ShowPilot, which doesn't need one).
+    // None of these fix themselves quickly, so wait 5 minutes.
+    log(`Outbound link refused by server (HTTP ${code})${code === 404 ? ' — this server has no link endpoint; set Connection to Self-hosted if it is your own ShowPilot' : ''}`);
+    try { req.destroy(); } catch (_) {}
+    scheduleLink([401, 403, 404].includes(code) ? 5 * 60 * 1000 : linkDelayMs);
+  });
+  sock.on('error', () => {});
+  sock.on('close', () => {
+    wsClients.delete(sock);
+    if (opened) log('Outbound link closed');
+    const wait = opened ? 1000 : linkDelayMs;
+    if (!opened) linkDelayMs = Math.min(linkDelayMs * 2, 60000);
+    scheduleLink(wait);
+  });
+}
+
+if (LinkWebSocket && LINK_CONFIG_FILE && LINK_TOKEN_FILE) connectLink();
+// No log otherwise: Self-hosted installs never use it.
 
 // App-level heartbeat every 5s, so clients notice a stalled daemon even
 // while FPP is idle and no positions are flowing.

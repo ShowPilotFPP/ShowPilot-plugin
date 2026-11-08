@@ -130,6 +130,7 @@ start_audio_daemon() {
     case "$port" in ''|*[!0-9]*) port=8090 ;; esac
 
     PORT="$port" MEDIA_ROOT="${MEDIADIR}/music" FPP_HOST="http://127.0.0.1" LOG_FILE="$PLUGIN_LOG" \
+        SP_CONFIG_FILE="$CONFIG_FILE" SP_TOKEN_FILE="${DATA_DIR}/showToken" \
         setsid "${run_as_fpp[@]}" "$(command -v node)" --max-old-space-size=64 "$AUDIO_DAEMON" \
         </dev/null >>"$PLUGIN_LOG" 2>&1 9<&- &
 }
