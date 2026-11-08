@@ -33,5 +33,12 @@ $dropRoot = (function_exists('posix_geteuid') && posix_geteuid() === 0 && is_exe
 @shell_exec('/usr/bin/setsid ' . $dropRoot . '/usr/bin/php ' . escapeshellarg($listenerPath)
     . ' </dev/null >>' . escapeshellarg(sp_log_file()) . ' 2>&1 &');
 
+// Also start the audio daemon if it isn't running. It only starts once a
+// Server URL is set, and normally only when fppd starts, so an FPP that
+// started before the URL was entered had no daemon until the next fppd
+// restart. ensure-daemon.sh never touches a daemon that is already running.
+@shell_exec('/usr/bin/setsid /bin/bash ' . escapeshellarg(dirname(__DIR__) . '/scripts/ensure-daemon.sh')
+    . ' </dev/null >/dev/null 2>&1 &');
+
 // Brief pause so the UI's immediate status re-poll already sees it running.
 usleep(200000);
