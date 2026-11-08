@@ -35,7 +35,7 @@
 			},
 			{
 				"to": "your ShowPilot server",
-				"what": "FPP's status every few seconds when ShowPilot asks for it: what's playing and next, FPP's version, host name and IP address, its sensors (such as CPU temperature), CPU, memory and disk use, the MultiSync systems it sees, and its playlist and command preset names",
+				"what": "FPP's status every few seconds when ShowPilot asks for it: what's playing and next, FPP's version, host name and IP address, its sensors (such as CPU temperature), CPU, memory and disk use, the MultiSync systems it sees with each FPP remote's own status (what it's playing, CPU temperature and other sensors, CPU, memory and uptime, which the plugin asks each remote for on your show network), and its playlist and command preset names",
 				"why": "for ShowPilot's FPP Monitor page, which also lets you start a playlist, run a command preset, stop the show or restart FPPD from ShowPilot",
 				"alwaysOn": false
 			}
