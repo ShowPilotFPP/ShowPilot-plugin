@@ -357,14 +357,25 @@ function sp_fpp_get_json($path) {
 
 // MultiSync remotes' own status (v0.14.27+, ShowPilot v0.33.278-master.15+).
 // Every 15 s while the FPP Monitor is wanted, ask each FPP this one sees on
-// the show network for its /api/system/status, all at once (curl_multi) with
-// a 2 s limit, so the listener loop never waits long. Only private IPv4
-// addresses of FPP systems (player/remote), at most 16, one request per
-// address. A remote that doesn't answer is sent as null (ShowPilot shows it
-// offline). Each answer is cut down to what ShowPilot shows: state, sequence, CPU,
-// memory, sensors (temperatures), uptime and platform.
+// the show network for its /api/system/status, all at once (curl_multi).
+// Only private IPv4 addresses of FPP systems (player/remote/master), at most
+// 16, one request per address. A remote that doesn't answer is sent as null
+// (ShowPilot shows it offline). Each answer is cut down to what ShowPilot
+// shows: state, sequence, CPU, memory, sensors (temperatures), uptime and
+// platform.
+//
+// This runs inside the listener loop, which also fetches the vote winner /
+// next request in the last few seconds of a song, so it must never hold the
+// loop for long:
+//   - 0.5 s connect / 1 s total limit (FPPs on the show LAN answer in ms);
+//   - a remote that didn't answer is skipped (sent as null) for 60 s, so a
+//     powered-off remote doesn't cost a timeout every 15 s;
+//   - no asking at all while a song is within Request Fetch Time + 3 s of its
+//     end; the last answers are re-sent instead.
 $fppRemoteStatus = array();
 $fppRemoteStatusAt = 0;
+$fppRemoteDownUntil = array();
+define('SP_REMOTE_RETRY_SEC', 60);
 
 function sp_is_private_ipv4($ip) {
     if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) return false;
@@ -404,9 +415,16 @@ function sp_trim_remote_status($j) {
     );
 }
 
-function sp_fpp_remote_statuses($multisync, $now) {
-    global $fppRemoteStatus, $fppRemoteStatusAt;
+function sp_fpp_remote_statuses($multisync, $localStatus) {
+    global $fppRemoteStatus, $fppRemoteStatusAt, $fppRemoteDownUntil, $cfg;
     if (time() - $fppRemoteStatusAt < 15) return $fppRemoteStatus;
+    // Stay out of the end-of-song window, where the listener fetches the
+    // vote winner / next request and a delay could miss the insert.
+    if (is_array($localStatus) && isset($localStatus['status_name'])
+        && $localStatus['status_name'] === 'playing' && isset($localStatus['seconds_remaining'])) {
+        $guard = (isset($cfg['requestFetchTime']) ? intval($cfg['requestFetchTime']) : 3) + 3;
+        if (intval($localStatus['seconds_remaining']) <= $guard) return $fppRemoteStatus;
+    }
     $fppRemoteStatusAt = time();
     $ips = array();
     $systems = (is_array($multisync) && isset($multisync['systems']) && is_array($multisync['systems'])) ? $multisync['systems'] : array();
@@ -424,24 +442,38 @@ function sp_fpp_remote_statuses($multisync, $now) {
         if (count($ips) >= 16) break;
     }
     $out = array();
-    if (!count($ips)) { $fppRemoteStatus = $out; return $out; }
-    if (function_exists('curl_multi_init')) {
+    $ask = array();
+    $now = time();
+    foreach (array_keys($ips) as $ip) {
+        if (isset($fppRemoteDownUntil[$ip]) && $now < $fppRemoteDownUntil[$ip]) {
+            $out[$ip] = null; // didn't answer recently; still shown offline
+        } else {
+            $ask[] = $ip;
+        }
+    }
+    // Forget remotes that left the MultiSync list.
+    foreach (array_keys($fppRemoteDownUntil) as $ip) {
+        if (!isset($ips[$ip])) unset($fppRemoteDownUntil[$ip]);
+    }
+    if (count($ask) && function_exists('curl_multi_init')) {
         $mh = curl_multi_init();
         $hs = array();
-        foreach (array_keys($ips) as $ip) {
+        foreach ($ask as $ip) {
             $ch = curl_init('http://' . $ip . '/api/system/status');
             curl_setopt_array($ch, array(
                 CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => false,
-                CURLOPT_CONNECTTIMEOUT_MS => 1500, CURLOPT_TIMEOUT_MS => 2000,
+                CURLOPT_CONNECTTIMEOUT_MS => 500, CURLOPT_TIMEOUT_MS => 1000,
+                CURLOPT_NOSIGNAL => true,
             ));
             curl_multi_add_handle($mh, $ch);
             $hs[$ip] = $ch;
         }
+        $deadline = microtime(true) + 1.5; // hard stop, whatever curl does
         $running = 0;
         do {
             curl_multi_exec($mh, $running);
-            if ($running) curl_multi_select($mh, 0.2);
-        } while ($running > 0);
+            if ($running && curl_multi_select($mh, 0.2) === -1) usleep(20000);
+        } while ($running > 0 && microtime(true) < $deadline);
         foreach ($hs as $ip => $ch) {
             $body = curl_multi_getcontent($ch);
             $out[$ip] = (curl_getinfo($ch, CURLINFO_HTTP_CODE) === 200 && is_string($body) && strlen($body) < 500000)
@@ -450,12 +482,22 @@ function sp_fpp_remote_statuses($multisync, $now) {
             curl_close($ch);
         }
         curl_multi_close($mh);
-    } else {
+    } elseif (count($ask)) {
         // No curl: one at a time, short timeouts, fewer remotes.
-        $ctx = stream_context_create(array('http' => array('timeout' => 1, 'ignore_errors' => true, 'follow_location' => 0)));
-        foreach (array_slice(array_keys($ips), 0, 4) as $ip) {
+        $ctx = stream_context_create(array('http' => array('timeout' => 0.5, 'ignore_errors' => true, 'follow_location' => 0)));
+        foreach ($ask as $n => $ip) {
+            if ($n >= 2) { $out[$ip] = null; continue; }
             $body = @file_get_contents('http://' . $ip . '/api/system/status', false, $ctx);
             $out[$ip] = $body === false ? null : sp_trim_remote_status(json_decode($body, true));
+        }
+    }
+    foreach ($ask as $ip) {
+        if (array_key_exists($ip, $out) && $out[$ip] === null) {
+            if (!isset($fppRemoteDownUntil[$ip])) logEntry("[fpp-monitor] remote $ip didn't answer; asking again in " . SP_REMOTE_RETRY_SEC . " s");
+            $fppRemoteDownUntil[$ip] = $now + SP_REMOTE_RETRY_SEC;
+        } else {
+            if (isset($fppRemoteDownUntil[$ip])) logEntry("[fpp-monitor] remote $ip answering again");
+            unset($fppRemoteDownUntil[$ip]);
         }
     }
     $fppRemoteStatus = $out;
@@ -507,7 +549,7 @@ function sp_fpp_monitor_tick() {
         'status' => $status,
         'multisync' => $multisync,
     );
-    $remoteStatus = sp_fpp_remote_statuses($multisync, time());
+    $remoteStatus = sp_fpp_remote_statuses($multisync, $status);
     if (count($remoteStatus)) $body['remoteStatus'] = $remoteStatus;
     $dir = isset($settings['mediaDirectory']) ? $settings['mediaDirectory'] : '/home/fpp/media';
     $free = @disk_free_space($dir);
