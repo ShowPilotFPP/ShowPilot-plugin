@@ -510,7 +510,10 @@ function sp_fpp_monitor_run($c) {
     switch ($action) {
         case 'startPlaylist':
             if ($name === '') return array(false, 'No playlist name');
-            $r = sp_run_fpp_command('Start Playlist', array($name, 'false', 'false'));
+            // ShowPilot v0.33.284-master.6+ sends repeat: true for "Start on
+            // repeat" (Cockpit FPP Controls). FPP's args: name, repeat, if not running.
+            $repeat = (isset($c->repeat) && $c->repeat === true) ? 'true' : 'false';
+            $r = sp_run_fpp_command('Start Playlist', array($name, $repeat, 'false'));
             break;
         case 'preset':
             if ($name === '') return array(false, 'No preset name');
