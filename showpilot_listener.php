@@ -358,11 +358,11 @@ function sp_fpp_get_json($path) {
 // MultiSync remotes' own status (v0.14.27+, ShowPilot v0.33.278-master.15+).
 // Every 15 s while the FPP Monitor is wanted, ask each FPP this one sees on
 // the show network for its /api/system/status, all at once (curl_multi).
-// Only private IPv4 addresses of FPP systems (player/remote/master), at most
-// 16, one request per address. A remote that doesn't answer is sent as null
-// (ShowPilot shows it offline). Each answer is cut down to what ShowPilot
-// shows: state, sequence, CPU, memory, sensors (temperatures), uptime and
-// platform.
+// Only FPP systems (MultiSync typeId 1-0x7F, any mode) at private IPv4
+// addresses, at most 16, one request per FPP (see below). A remote that
+// doesn't answer is sent as null (ShowPilot shows it offline). Each answer
+// is cut down to what ShowPilot shows: state, sequence, CPU, memory, sensors
+// (temperatures), uptime and platform.
 //
 // This runs inside the listener loop, which also fetches the vote winner /
 // next request in the last few seconds of a song, so it must never hold the
@@ -426,21 +426,56 @@ function sp_fpp_remote_statuses($multisync, $localStatus) {
         if (intval($localStatus['seconds_remaining']) <= $guard) return $fppRemoteStatus;
     }
     $fppRemoteStatusAt = time();
-    $ips = array();
+    // One request per FPP, however many addresses it has. FPP lists a system
+    // once per address (Wi-Fi + Ethernet, IPv6, link-local), and lists this
+    // FPP under its other addresses as not local, so systems are grouped by
+    // uuid (or host name, then address) and this FPP's own group is left
+    // out. The answer is sent under every private IPv4 address of the group,
+    // so ShowPilot finds it whichever address it shows the remote by.
+    // FPPs are MultiSync typeId 1-0x7F, whatever their mode (bridge-mode FPPs
+    // included); 0 is "unknown" and 0x80+ are controllers (Falcon, Genius,
+    // Baldrick, WLED ...), which don't answer /api/system/status.
     $systems = (is_array($multisync) && isset($multisync['systems']) && is_array($multisync['systems'])) ? $multisync['systems'] : array();
+    $groupKey = function ($s) {
+        $uuid = isset($s['uuid']) ? trim((string)$s['uuid']) : '';
+        if ($uuid !== '' && strcasecmp($uuid, 'Unknown') !== 0) return 'u:' . strtolower($uuid);
+        $host = isset($s['hostname']) ? strtolower(trim((string)$s['hostname'])) : '';
+        $addr = isset($s['address']) ? (string)$s['address'] : '';
+        return ($host !== '' && $host !== strtolower($addr)) ? 'h:' . $host : 'a:' . $addr;
+    };
+    $selfKeys = array();
+    foreach ($systems as $s) {
+        if (!is_array($s) || empty($s['local'])) continue;
+        $selfKeys[$groupKey($s)] = true;
+        $host = isset($s['hostname']) ? strtolower(trim((string)$s['hostname'])) : '';
+        if ($host !== '') $selfKeys['h:' . $host] = true;
+    }
+    $groups = array(); // key => list of private IPv4 addresses, first is asked
     foreach ($systems as $s) {
         if (!is_array($s) || !empty($s['local'])) continue;
+        if (isset($s['typeId']) && is_numeric($s['typeId'])) {
+            $t = intval($s['typeId']);
+            if ($t < 1 || $t >= 0x80) continue;
+        } else {
+            // No typeId (shouldn't happen on FPP 10+): fall back to the mode.
+            $mode = isset($s['fppModeString']) ? strtolower((string)$s['fppModeString']) : '';
+            if (!in_array($mode, array('player', 'remote', 'master'), true)) continue;
+        }
+        $key = $groupKey($s);
+        $host = isset($s['hostname']) ? strtolower(trim((string)$s['hostname'])) : '';
+        if (isset($selfKeys[$key]) || ($host !== '' && isset($selfKeys['h:' . $host]))) continue;
         $ip = isset($s['address']) ? (string)$s['address'] : '';
-        if (!sp_is_private_ipv4($ip) || isset($ips[$ip])) continue;
-        // FPP systems only (controllers don't answer /api/system/status).
-        $mode = isset($s['fppModeString']) ? strtolower((string)$s['fppModeString']) : '';
-        // Not 'bridge': that's mostly controllers such as WLED.
-        if (!in_array($mode, array('player', 'remote', 'master'), true)) continue;
-        // No lastSeen filter: FPP only refreshes it now and then (20+ min old
-        // on a healthy show), so a remote that answers is simply online.
-        $ips[$ip] = true;
-        if (count($ips) >= 16) break;
+        if (!sp_is_private_ipv4($ip)) continue;
+        if (!isset($groups[$key])) {
+            if (count($groups) >= 16) continue;
+            $groups[$key] = array();
+        }
+        if (!in_array($ip, $groups[$key], true)) $groups[$key][] = $ip;
     }
+    // No lastSeen filter: FPP only refreshes it now and then (20+ min old on a
+    // healthy show), so a remote that answers is simply online.
+    $ips = array();
+    foreach ($groups as $g) $ips[$g[0]] = true;
     $out = array();
     $ask = array();
     $now = time();
@@ -498,6 +533,12 @@ function sp_fpp_remote_statuses($multisync, $localStatus) {
         } else {
             if (isset($fppRemoteDownUntil[$ip])) logEntry("[fpp-monitor] remote $ip answering again");
             unset($fppRemoteDownUntil[$ip]);
+        }
+    }
+    // Same answer under the remote's other addresses.
+    foreach ($groups as $g) {
+        for ($i = 1; $i < count($g); $i++) {
+            $out[$g[$i]] = array_key_exists($g[0], $out) ? $out[$g[0]] : null;
         }
     }
     $fppRemoteStatus = $out;
