@@ -626,6 +626,29 @@ function spInputAttrs($pluginName, $key, $expr) {
         }
       }
 
+      // Lead-in and lead-out songs (an intro, an outro) play but aren't
+      // offered to viewers. They go as `audioOnly` so phones get their audio
+      // (ShowPilot v0.33.284-master.9+, same as ShowPilot Player 0.14.3).
+      // Only entries with audio; a name also in the main playlist stays a
+      // normal song. Older servers ignore the list and don't answer
+      // `audioOnly`, so their audio is then not uploaded.
+      const mainNames = new Set(sequences.map(function (x) { return x.name; }));
+      const audioOnly = [];
+      []
+        .concat((plData && plData.leadIn) || [], (plData && plData.leadOut) || [])
+        .forEach(function (item) {
+          if (!item || (item.type !== 'both' && item.type !== 'media') || !item.mediaName) return;
+          const file = item.type === 'both' ? (item.sequenceName || item.mediaName) : item.mediaName;
+          const name = String(file).replace(/\.[^.]+$/, '');
+          if (!name || mainNames.has(name) || audioOnly.some(function (x) { return x.name === name; })) return;
+          audioOnly.push({
+            name: name,
+            displayName: prettifyName(name),
+            mediaName: item.mediaName,
+            durationSeconds: item.duration ? Math.round(item.duration) : null,
+          });
+        });
+
       setStatus('syncStatus', 'Pushing ' + sequences.length + ' sequences to ShowPilot…', 'muted');
 
       // Route through the FPP-side proxy — same-origin, ad-blocker safe.
@@ -633,7 +656,9 @@ function spInputAttrs($pluginName, $key, $expr) {
       const syncRes = await showpilotFetch('/api/plugin/sync-sequences', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playlistName: playlist, sequences: sequences }),
+        body: JSON.stringify(audioOnly.length
+          ? { playlistName: playlist, sequences: sequences, audioOnly: audioOnly }
+          : { playlistName: playlist, sequences: sequences }),
       });
 
       if (!syncRes.ok) {
@@ -644,6 +669,11 @@ function spInputAttrs($pluginName, $key, $expr) {
       }
 
       const data = await syncRes.json();
+      // The server answers audioOnly when it took the lead-in/lead-out songs.
+      const leadTaken = audioOnly.length > 0 && typeof data.audioOnly === 'number';
+      const leadNote = !audioOnly.length ? ''
+        : leadTaken ? ' · ' + audioOnly.length + ' lead-in/out for phones only'
+        : ' · lead-in/out songs need ShowPilot v0.33.284-master.9 or newer';
 
       // ---- Audio cache sync ----
       // If the user has unchecked the audio-sync checkbox, skip.
@@ -652,7 +682,7 @@ function spInputAttrs($pluginName, $key, $expr) {
       let audioSyncSummary = '';
       if (shouldSyncAudio) {
         try {
-          audioSyncSummary = await syncAudioCache(sequences);
+          audioSyncSummary = await syncAudioCache(leadTaken ? sequences.concat(audioOnly) : sequences);
         } catch (e) {
           // Audio sync failure shouldn't fail the whole sync — metadata is
           // already pushed, viewers still work via the FPP-proxy fallback
@@ -663,7 +693,7 @@ function spInputAttrs($pluginName, $key, $expr) {
       }
 
       setStatus('syncStatus',
-        '✓ Synced ' + (data.synced || sequences.length) + ' sequences' + audioSyncSummary,
+        '✓ Synced ' + (data.synced || sequences.length) + ' sequences' + leadNote + audioSyncSummary,
         'success');
     } catch (err) {
       setStatus('syncStatus', 'Sync failed: ' + err.message, 'error');
