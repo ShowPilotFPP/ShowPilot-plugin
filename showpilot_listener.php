@@ -105,12 +105,18 @@ if (empty($cfg['serverUrl']) || empty($cfg['showToken'])) {
 // ============================================================
 
 // Returns the decoded JSON body of a 2xx response, or null.
-function ofHttp($method, $path, $body = null) {
-    global $cfg;
+$spLastRttMs = null;   // round trip of the last good request (ofReportNext)
 
+function ofHttp($method, $path, $body = null) {
+    global $cfg, $spLastRttMs;
+
+    $t0 = microtime(true);
     $r = sp_http($cfg['serverUrl'], $cfg['showToken'], $method, $path,
         $body === null ? null : json_encode($body));
     if ($r === null) return null;
+    if ($r['body'] !== null && $r['status'] >= 200 && $r['status'] < 300) {
+        $spLastRttMs = (int)round((microtime(true) - $t0) * 1000);
+    }
 
     if ($r['body'] === null) {
         logEntry_verbose("ERROR - Request to $path failed");
@@ -175,11 +181,20 @@ function ofReportPosition($sequenceName, $secondsPlayed) {
 // from FPP's live play order (shuffle included) and is the truth -- an empty
 // name then means "nothing knowable is next", so ShowPilot must not guess
 // from playlist order. Older servers ignore the extra field.
-function ofReportNext($sequenceName, $exact = false) {
-    return ofHttp('POST', '/api/plugin/next', array(
+function ofReportNext($sequenceName, $exact = false, $startsInMs = null) {
+    global $spLastRttMs;
+    $body = array(
         'sequence' => $sequenceName,
         'exact'    => (bool)$exact,
-    ));
+    );
+    // When it starts (ShowPilot v0.33.284-master.8+; older servers ignore
+    // it), with the last request's round trip so the server can allow for
+    // the time this one takes to arrive.
+    if ($startsInMs !== null) {
+        $body['startsInMs'] = $startsInMs;
+        if ($spLastRttMs !== null) $body['rttMs'] = $spLastRttMs;
+    }
+    return ofHttp('POST', '/api/plugin/next', $body);
 }
 
 // Heartbeat
@@ -1101,6 +1116,115 @@ function sp_next_from_live($live, $cooled) {
     return '';
 }
 
+// Length of a sequence file in ms, from its header (frame count x frame
+// time; the same at byte 14 and 18 in FSEQ v1 and v2). Cached per file.
+$spFseqLenCache = array();
+function sp_fseq_ms($sequenceName) {
+    global $settings, $spFseqLenCache;
+    $f = basename((string)$sequenceName);
+    if ($f === '') return null;
+    if (array_key_exists($f, $spFseqLenCache)) return $spFseqLenCache[$f];
+    $dir = isset($settings['mediaDirectory']) ? $settings['mediaDirectory'] : '/home/fpp/media';
+    $ms = null;
+    $h = @fopen($dir . '/sequences/' . $f, 'rb');
+    if ($h) {
+        $hdr = fread($h, 20);
+        fclose($h);
+        if (is_string($hdr) && strlen($hdr) >= 19 && (substr($hdr, 0, 4) === 'PSEQ' || substr($hdr, 0, 4) === 'FSEQ')) {
+            $frames = unpack('V', substr($hdr, 14, 4))[1];
+            $step = ord($hdr[18]);
+            if ($frames > 0 && $step > 0) $ms = $frames * $step;
+        }
+    }
+    $spFseqLenCache[$f] = $ms;
+    return $ms;
+}
+
+// How long the playing entry of FPP's live playlist has left, in ms; null
+// when FPP doesn't say. Pause entries carry their own end time; songs say
+// how far in they are (media to the hundredth of a second).
+function sp_entry_left_ms($e, $nowMs) {
+    if (!is_array($e)) return null;
+    $type = isset($e['type']) ? $e['type'] : '';
+    if ($type === 'pause') {
+        if (!empty($e['endTime'])) return max(0.0, floatval($e['endTime']) - $nowMs);
+        return null;
+    }
+    $media = null;
+    if ($type === 'media') $media = $e;
+    elseif ($type === 'both' && isset($e['media']) && is_array($e['media'])) $media = $e['media'];
+    if ($media !== null && isset($media['secondsRemaining'])) {
+        return max(0.0, intval($media['secondsRemaining']) * 1000 + intval($media['subSecondsRemaining'] ?? 0) * 10);
+    }
+    $seq = null;
+    if ($type === 'sequence') $seq = $e;
+    elseif ($type === 'both' && isset($e['sequence']) && is_array($e['sequence'])) $seq = $e['sequence'];
+    if ($seq !== null && isset($seq['millisecondsElapsed']) && isset($seq['sequenceName'])) {
+        $len = sp_fseq_ms($seq['sequenceName']);
+        if ($len !== null) return max(0.0, $len - floatval($seq['millisecondsElapsed']));
+    }
+    return null;
+}
+
+// When the next song [$nextName] starts, in ms from now, by FPP's live
+// playlist: what's left of the playing entry, plus pause entries in between
+// and FPP's own pause between sequences. Phones start the song on that time
+// instead of after hearing that it started. null when it can't be known
+// (an entry of unknown length is in between: a command, script, image...).
+function sp_next_start_in_ms($live, $fppStatus, $nextName, $cooled) {
+    if ($nextName === '' || !is_array($live)) return null;
+    if (isset($fppStatus->current_sequence) && $fppStatus->current_sequence === 'Global Pause') return null;
+    $gap = 0;
+    if (isset($fppStatus->global_pause) && !empty($fppStatus->global_pause->configured)
+        && isset($fppStatus->global_pause->duration_ms)) {
+        $gap = max(0, intval($fppStatus->global_pause->duration_ms));
+    }
+
+    $sections = array();
+    foreach (array('leadIn', 'mainPlaylist', 'leadOut') as $sec) {
+        $sections[$sec] = (isset($live[$sec]) && is_array($live[$sec])) ? array_values($live[$sec]) : array();
+    }
+    $curSec = null; $curIdx = -1;
+    foreach ($sections as $sec => $items) {
+        foreach ($items as $i => $e) {
+            if (!empty($e['isPlaying'])) { $curSec = $sec; $curIdx = $i; break 2; }
+        }
+    }
+    if ($curSec === null) return null;
+
+    $cur = $sections[$curSec][$curIdx];
+    $left = sp_entry_left_ms($cur, microtime(true) * 1000);
+    if ($left === null) return null;
+    $total = $left;
+    if ($gap > 0 && sp_entry_song_name($cur) !== '') $total += $gap;
+
+    // The entries after this one, in the order FPP plays them.
+    $after = array_slice($sections[$curSec], $curIdx + 1);
+    $repeat = !empty($live['repeat']);
+    $loop = isset($live['loop']) ? intval($live['loop']) : 0;
+    $loopCount = isset($live['loopCount']) ? intval($live['loopCount']) : 0;
+    $random = isset($live['random']) ? intval($live['random']) : 0;
+    $loopsAgain = $repeat && ($loopCount <= 0 || ($loop + 1) < $loopCount);
+    if ($curSec === 'leadIn') {
+        $after = array_merge($after, $sections['mainPlaylist']);
+    } elseif ($curSec === 'mainPlaylist') {
+        if ($loopsAgain && $random !== 2) $after = array_merge($after, $sections['mainPlaylist']);
+        elseif (!$loopsAgain) $after = array_merge($after, $sections['leadOut']);
+    }
+
+    foreach ($after as $e) {
+        if (isset($e['enabled']) && !$e['enabled']) continue;
+        $type = isset($e['type']) ? $e['type'] : '';
+        if ($type === 'pause') { $total += floatval($e['duration'] ?? 0) * 1000; continue; }
+        $n = sp_entry_song_name($e);
+        if ($n === '') return null;                 // unknown length in between
+        if ($n === $nextName) return (int)round($total);
+        if (isset($cooled[$n])) continue;           // skipped by the cooldown hook
+        return null;
+    }
+    return null;
+}
+
 // What's next on FPP. Returns array('name' => string, 'exact' => bool).
 // exact=false keeps ShowPilot's own fallbacks (vote/queue/baseline/order).
 $liveNextCache = array('key' => '', 'at' => 0, 'result' => null);
@@ -1109,8 +1233,9 @@ function getNextScheduledSequence($fppStatus, $currentlyPlaying, $remotePlaylist
     global $activeCooldowns, $cooldownExclude, $liveNextCache;
     $none = array('name' => '', 'exact' => false);
 
-    // If nothing's playing, we have no basis for "what's next"
-    if (empty($currentlyPlaying)) return $none;
+    // A pause entry (FPP playing, but no song) still has a next song: the
+    // live playlist knows it. Only the live answer is used then.
+    $inPause = empty($currentlyPlaying);
 
     if (!isset($fppStatus->current_playlist) || $fppStatus->current_playlist === null) return $none;
     $currentPlaylist = isset($fppStatus->current_playlist->playlist) ? $fppStatus->current_playlist->playlist : "";
@@ -1135,11 +1260,18 @@ function getNextScheduledSequence($fppStatus, $currentlyPlaying, $remotePlaylist
         $live = getLivePlaylistConfig();
         if ($live !== null && isset($live['name']) && $live['name'] === $currentPlaylist) {
             $n = sp_next_from_live($live, $cooled);
-            if ($n !== null) $result = array('name' => $n, 'exact' => true);
+            if ($n !== null) {
+                // When it starts, as a time on this clock (stays right while
+                // the cached answer is reused).
+                $in = sp_next_start_in_ms($live, $fppStatus, $n, $cooled);
+                $result = array('name' => $n, 'exact' => true,
+                                'startsAt' => $in === null ? null : microtime(true) * 1000 + $in);
+            }
         }
         $liveNextCache = array('key' => $key, 'at' => time(), 'result' => $result);
     }
     if ($liveNextCache['result'] !== null) return $liveNextCache['result'];
+    if ($inPause) return $none;
 
     // Fallback: the playlist file on disk. Its order is only what plays when
     // the playlist isn't random; for a random playlist say nothing rather
@@ -1175,6 +1307,7 @@ function getNextScheduledSequence($fppStatus, $currentlyPlaying, $remotePlaylist
 $lastPlayingReported = "";
 $lastNextReported = "";
 $lastNextExact = false;
+$lastNextStartsAt = null;
 $lastQueuedAt = 0;
 $lastWasRemote = false;       // Tracks previous loop's $playingFromRemote value
 // Pending queue: array of ['name' => sequenceName, 'idx' => playlistIndex]
@@ -1270,6 +1403,7 @@ while (true) {
             $lastPlayingReported = '';
             $lastNextReported = '';
             $lastNextExact = false;
+            $lastNextStartsAt = null;
             $pendingQueue = array();
             $sequencesClearedWhenIdle = true;
             $lastQueuedAt = 0;
@@ -1364,11 +1498,18 @@ while (true) {
     }
 
     $next = getNextScheduledSequence($fppStatus, $currentlyPlaying, $cfg['remotePlaylist']);
-    if ($next['name'] !== $lastNextReported || $next['exact'] !== $lastNextExact) {
+    $nextAt = isset($next['startsAt']) ? $next['startsAt'] : null;
+    // Re-send when the start time moves (a pause/resume, a corrected estimate).
+    $timingChanged = ($nextAt === null) !== ($lastNextStartsAt === null)
+        || ($nextAt !== null && abs($nextAt - $lastNextStartsAt) > 40);
+    if ($next['name'] !== $lastNextReported || $next['exact'] !== $lastNextExact || $timingChanged) {
         // Always report — including empty string, so server clears its value
-        ofReportNext($next['name'], $next['exact']);
+        $startsIn = $nextAt === null ? null : (int)round($nextAt - microtime(true) * 1000);
+        if ($startsIn !== null && $startsIn < -1000) $startsIn = null;
+        ofReportNext($next['name'], $next['exact'], $startsIn);
         $lastNextReported = $next['name'];
         $lastNextExact = $next['exact'];
+        $lastNextStartsAt = $nextAt;
     }
 
     // Check whether we should queue a viewer-selected sequence
