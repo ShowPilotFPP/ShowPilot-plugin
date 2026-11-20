@@ -961,6 +961,57 @@ function getFppStatus() {
     return json_decode($result);
 }
 
+// ============================================================
+// Hard-stop guard
+// ============================================================
+// FPP cuts a playlist off mid-song when its schedule entry uses a Hard stop
+// (at its end time, or when a higher schedule row takes over). A request
+// that started inside that last stretch was cut off part-way, and ShowPilot
+// had already counted it as played, so the viewer never heard their song.
+// While a request couldn't finish before that cut, ask ShowPilot for nothing:
+// the requests stay waiting in ShowPilot's queue (nothing is handed out) and
+// play once the next playlist starts. Everything else keeps running (now
+// playing, positions, phone audio).
+$spMaxDurCache = array('name' => null, 'mtime' => null, 'max' => 0.0);
+
+// Longest song in the Remote Playlist, in seconds (0 if unknown).
+function sp_remote_max_duration($playlistName) {
+    global $spMaxDurCache;
+    $path = sp_playlist_path($playlistName);
+    $mtime = ($path !== null && is_readable($path)) ? @filemtime($path) : null;
+    if ($spMaxDurCache['name'] === $playlistName && $spMaxDurCache['mtime'] === $mtime) {
+        return $spMaxDurCache['max'];
+    }
+    $max = 0.0;
+    $data = sp_read_playlist($playlistName);
+    if ($data !== null && isset($data['mainPlaylist']) && is_array($data['mainPlaylist'])) {
+        foreach ($data['mainPlaylist'] as $entry) {
+            if (isset($entry['duration']) && is_numeric($entry['duration'])) {
+                $max = max($max, floatval($entry['duration']));
+            }
+        }
+    }
+    $spMaxDurCache = array('name' => $playlistName, 'mtime' => $mtime, 'max' => $max);
+    return $max;
+}
+
+// Seconds until FPP's scheduler hard-stops the running playlist, or null when
+// it won't (manual play, Graceful stop, or no end in sight). The next
+// scheduled playlist counts too: a higher row taking over stops the running
+// one the same way. That may be a lower row that wouldn't take over; then
+// requests only wait a little longer than they had to.
+function sp_hard_stop_in($fppStatus) {
+    $sched = isset($fppStatus->scheduler) ? $fppStatus->scheduler : null;
+    $cp = ($sched !== null && isset($sched->currentPlaylist)) ? $sched->currentPlaylist : null;
+    if ($cp === null || !isset($cp->stopType) || intval($cp->stopType) !== 1) return null;
+    $now = time();
+    $cut = isset($cp->actualEndTime) ? intval($cp->actualEndTime) : 0;
+    $next = isset($sched->nextPlaylist->scheduledStartTime) ? intval($sched->nextPlaylist->scheduledStartTime) : 0;
+    if ($next > $now && ($cut <= $now || $next < $cut)) $cut = $next;
+    if ($cut <= $now) return null;
+    return $cut - $now;
+}
+
 function insertPlaylistAfterCurrent($playlistName, $startIndex, $endIndex = null) {
     // Insert a range from the remote playlist after the current song.
     // Passing start != end queues multiple songs FPP can skip through.
@@ -1330,6 +1381,13 @@ $cachedModeAt = 0;
 // each request is inserted on its own and the "ShowPilot Queue" playlist
 // isn't used (see the queue decision below).
 $serverOneAtATime = false;
+// True while the hard-stop guard is holding requests (logs once per hold).
+$hardStopHolding = false;
+// Until this time, a request held by the guard may cut in at the very start
+// of the next playlist's first song (0 = not armed).
+$hardStopCatchUpUntil = 0;
+$hardStopHeldIn = '';         // playlist that was running when the hold began
+$hardStopCutAt = 0;           // when the schedule was due to cut that playlist off
 
 // On startup: repair any playlists left edited by pre-0.14 versions, then
 // publish the current cooldown state for the C++ hook.
@@ -1601,8 +1659,68 @@ while (true) {
         }
     }
 
+    // Hard-stop guard (see sp_hard_stop_in): don't take a jukebox request
+    // that couldn't finish before the schedule cuts this playlist off. In
+    // Listen Only the mode check reports JUKEBOX too. Voting and race rounds
+    // are left alone (holding a winner would lose the round).
+    $holdForHardStop = false;
+    if ($cachedMode === 'JUKEBOX' && !empty($cfg['remotePlaylist'])) {
+        $cutIn = sp_hard_stop_in($fppStatus);
+        if ($cutIn !== null) {
+            // A request cuts in now, or waits for the current song to end.
+            $startIn = ($effectiveInterrupt && !$playingFromRemote)
+                ? 0 : max(0, intval($fppStatus->seconds_remaining ?? 0));
+            $longest = sp_remote_max_duration($cfg['remotePlaylist']);
+            if ($startIn + $longest + 5 > $cutIn) {
+                $holdForHardStop = true;
+                $shouldCheck = false;
+                $hardStopCutAt = time() + $cutIn;
+                if (!$hardStopHolding) {
+                    logEntry("Schedule hard-stops this playlist in {$cutIn}s; requests wait in ShowPilot"
+                        . " until the next playlist starts, so none is cut off part-way");
+                    $hardStopHeldIn = $currentPlaylistNow;
+                }
+            }
+        }
+    }
+    if ($hardStopHolding && !$holdForHardStop) {
+        logEntry_verbose("Hard-stop guard released");
+        // The schedule moved straight on to another playlist at the cut: let
+        // a waiting request play first instead of after that playlist's first
+        // song. Only right at the cut; a playlist started later (e.g. by hand
+        // after a curfew stop) follows its own Interrupt Schedule setting.
+        if ($currentPlaylistNow !== '' && $currentPlaylistNow !== $hardStopHeldIn
+            && abs(time() - $hardStopCutAt) <= 15) {
+            $hardStopCatchUpUntil = time() + 10;
+        }
+    }
+    $hardStopHolding = $holdForHardStop;
+
+    // Catch-up: in the first seconds of the new playlist's first song, ask
+    // ShowPilot once and cut a waiting request in straight away, even if
+    // Interrupt Schedule is off. FPP pauses the song and carries on from
+    // there after the request (and any requests that follow it).
+    $catchUpNow = false;
+    if ($hardStopCatchUpUntil > 0) {
+        $playedSec = isset($fppStatus->seconds_played) ? floatval($fppStatus->seconds_played) : 99;
+        if (time() > $hardStopCatchUpUntil || $playingFromRemote || $playedSec > 3
+            || $cachedMode !== 'JUKEBOX' || $holdForHardStop) {
+            $hardStopCatchUpUntil = 0;
+        } else {
+            $catchUpNow = true;
+            $shouldCheck = true;
+            $effectiveInterrupt = true;
+        }
+    }
+
     if ($shouldCheck && !empty($cfg['remotePlaylist'])) {
         $state = ofGetState();
+        if ($state !== null && $catchUpNow) {
+            $hardStopCatchUpUntil = 0;   // asked once; any answer ends the catch-up
+            if (isset($state->nextRequest)) {
+                logEntry("Playlist changed after a hard stop; playing the waiting request first");
+            }
+        }
         if ($state !== null) {
             // Record cooldowns for the C++ playlist hook. No playlist files
             // are touched; the hook only ever acts on the top-level playlist
